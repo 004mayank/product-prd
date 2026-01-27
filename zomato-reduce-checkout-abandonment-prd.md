@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="images/zomato-logo.png" alt="Zomato logo" width="200"/>
+  <img 
+    src="https://raw.githubusercontent.com/004mayank/product-teardowns/main/images/zomato-logo.png" 
+    alt="Zomato logo" 
+    width="200"
+  />
 </p>
 
 
