@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/zomato-logo.png" alt="Zomato logo" width="800"/>
+  <img src="images/zomato-logo.png" alt="Zomato logo" width="200"/>
 </p>
 
 
