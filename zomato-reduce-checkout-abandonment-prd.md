@@ -9,9 +9,9 @@
 
 # PRD: Reduce Checkout Abandonment in Zomato Ordering Flow
 
-**Product:** Zomato – Food Delivery  
+**Product:** Zomato - Food Delivery  
 **Author:** Mayank Malviya 
-**Status:** v1 – Problem framing & solution proposal
+**Status:** v1 - Problem framing & solution proposal
 
 ---
 
@@ -48,7 +48,7 @@ fee shock, and offer confusion**.
 
 ### Primary Persona
 **Urban frequent food-ordering user**
-- Orders 2–5 times per week
+- Orders 2-5 times per week
 - Price-aware but convenience-driven
 - Sensitive to unexpected charges
 
