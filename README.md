@@ -46,7 +46,7 @@ reason about, and communicate product decisions.
 
 ## PRDs
 
-- **Zomato – Reduce Checkout Abandonment**  
+- **Zomato - Reduce Checkout Abandonment**  
   Focus: Improving cart → order conversion by reducing price shock and friction  
   Status: v1
 
