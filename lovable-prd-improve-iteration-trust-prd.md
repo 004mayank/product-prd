@@ -1,5 +1,10 @@
+
 <p align="center">
-  <img src="images/Lovable.png" alt="Loavble logo" width="200"/>
+  <img 
+    src="https://raw.githubusercontent.com/004mayank/product-teardowns/main/images/Lovable.png" 
+    alt="Zomato logo" 
+    width="200"
+  />
 </p>
 
 # PRD: Improve Iteration Trust & Retention in Lovable
