@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/Lovable.png" alt="Loavble logo" width="200"/>
+</p>
+
 # PRD: Improve Iteration Trust & Retention in Lovable
 
 **Product:** Lovable  
