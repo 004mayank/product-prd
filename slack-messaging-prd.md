@@ -2,10 +2,14 @@
 
 **Product:** Slack (Messaging)
 **Author:** Mayank Malviya
-**Status:** v1 — execution-ready PRD
+**Status:** v2 — execution-ready PRD (deeper experiment + rollout plan)
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/slack-messaging-teardown.md
 
 ---
+
+## Version history
+- **v1 (initial):** Problem framing, core solution (bundling + focus modes + lightweight “needs you” labeling), baseline metrics + basic experiment outline.
+- **v2 (this revision):** Adds **user stories & acceptance criteria**, **rigorous experiment design** (randomization, segmentation, power heuristics, ramp), and a detailed **rollout + kill-switch plan** to safely ship load-shaping.
 
 ## 0) One-liner + context
 Build **Notification Load Shaping** to help Slack users stay responsive to what matters (mentions, threads they’re involved in, high-signal channels) while **reducing notification fatigue** in busy workspaces.
@@ -155,6 +159,39 @@ This classification powers:
 
 ---
 
+## 4.4) User stories & acceptance criteria
+### User stories
+1. **Deep work (reduce interruptions, don’t miss asks)**
+   - As a high-volume IC, when I enable **Deep work** for 1 hour, I want Slack to stop interrupting me for ambient channel chatter, while still surfacing messages that clearly need me.
+2. **Incident/war-room (keep channel hot)**
+   - As an on-call engineer, when I am in an incident channel, I want **all activity in that channel** to alert immediately (even if not a mention) so I can track the situation in real time.
+3. **Cross-device catch-up (single source of truth)**
+   - As a mobile-heavy user, when I receive bundled digests on my phone and later open Slack on desktop, I want a consistent “catch up” state so I don’t re-triage the same items twice.
+4. **Predictability + trust**
+   - As any user, when Slack bundles or suppresses notifications, I want to understand **what changed and why**, and be able to override it quickly.
+
+### Acceptance criteria (ship gates)
+**A. Correctness / safety**
+- **Mentions are never bundled by default.** Direct @mentions and DMs must remain immediate unless the user explicitly turns this off in advanced settings with a clear warning.
+- **Per-channel “Always immediate” override works across devices** within ≤60 seconds (config propagation).
+- **No silent loss:** every notification that would have been delivered in control is either delivered immediately or represented in a digest/catch-up surface (auditable in UI and logs).
+
+**B. UX requirements (minimum viable)**
+- Digest notification includes: (1) count of channels/threads, (2) top ranked preview(s), (3) CTA to **View digest**.
+- Catch-up view clearly labels at least three buckets: **Needs you / Active / FYI**, and allows a 1-tap jump into the underlying thread/channel.
+- Explainability: a “Why am I seeing this?” affordance exists for bundled items and for “Needs you” labeling.
+
+**C. Cross-device consistency**
+- A digest opened on device A is reflected as “seen/opened” on device B (eventual consistency acceptable, target p95 ≤5 minutes).
+- Focus mode state and remaining duration are consistent across devices (p95 ≤60 seconds).
+
+**D. Measurable outcomes (must hold in experiment before ramping beyond 25%)**
+- **Mention response rate** non-inferior vs control (define non-inferiority margin, e.g., −1% absolute).
+- **Mention response time p90** does not regress beyond pre-defined guardrail (e.g., +5% relative).
+- Opt-out rate for bundling remains below threshold (e.g., <8% of treated eligible users in first 2 weeks).
+
+---
+
 ## 5) Success metrics + instrumentation
 Aligning to teardown V2’s Loop B + overload metrics.
 
@@ -191,41 +228,95 @@ Ensure consistent `workspace_id`, `user_id`, `surface`, `channel_id`, `thread_ro
 
 ---
 
-## 6) Experiment / rollout plan
-### Unit of experimentation
-- **Primary:** user-level randomization (minimizes admin dependency; fastest iteration)
-- **Secondary:** workspace-level holdout for spillover checks (optional, later)
+## 6) Experiment design (rigorous)
+### 6.1 Unit of randomization + eligibility
+- **Primary unit:** **user-level** randomization **within workspace**, because the feature changes *delivery* not *sender behavior*.
+- **Eligibility:** users above a notification-volume threshold (e.g., p50+ of notifications/day, or ≥K/day) AND with at least N @mentions/week so mention metrics are powered.
+- **Stratification (recommended):** assign users within strata to reduce variance:
+  - platform: mobile-heavy vs desktop-heavy
+  - volume: medium vs very-high (e.g., p50–p90 vs p90+)
+  - role proxy: manager/leads vs IC (if available) or “sends many mentions” vs “receives many mentions”
 
-### Proposed design
-**Phase 0 — Dogfood / internal alpha (1–2 weeks)**
-- Enable for Slack-internal workspaces only
-- Validate: no critical mention misses; digest UI usable; device consistency
+### 6.2 Treatment arms
+- **Control:** current notification behavior.
+- **T1 (Bundling):** Smart Bundling for non-mention chatter + catch-up view.
+- **T2 (Bundling + Focus):** T1 + Focus Mode presets (Deep work / On call / In meetings).
 
-**Phase 1 — A/B test (2–4 weeks)**
-- 50/50 user split within eligible workspaces
-- Eligibility: users with notification volume above threshold (e.g., ≥K notifications/day) to ensure power
-- Treatments:
-  - T1: Smart bundling only
-  - T2: Smart bundling + focus mode presets
-  - Control: current behavior
+*(Optional later)* **T3 (Bundling + Focus + stronger ranking):** gated behind separate classifier iteration; avoid mixing algorithm changes with delivery changes in the first powered test.
 
-### Holdout & contamination
-- Because message senders are not changed, user-level testing is acceptable.
-- Monitor channel-level spillover (if fewer interrupts changes response patterns for teammates).
+### 6.3 Ramp + duration
+- **Phase 0 — Dogfood / internal alpha (1–2 weeks):**
+  - Validate: no critical mention misses; digest UX; cross-device state consistency.
+  - Confirm logging completeness for all primary metrics + guardrails.
+- **Phase 1 — External beta (1–2 weeks):**
+  - **5% ramp** of eligible users (with opt-out) to validate guardrails at small scale.
+- **Phase 2 — Powered A/B/n (2–4+ weeks):**
+  - Ramp to **25% / 25% / 50%** (T1/T2/Control) or **33/33/34** depending on desired compare.
+  - Run long enough to cover weekday cycles and “return after absence” patterns (at least 2 full work weeks).
 
-### Guardrails & stop conditions
-- Stop/rollback if:
-  - MRT p90 worsens beyond X% for @mentions
-  - Critical miss proxies exceed threshold
-  - Notification disablement increases significantly
+### 6.4 Power / sample size heuristics (practical)
+Because the primary outcome is “response reliability,” we power on **Mention Response Rate (MRR)**.
+- Let baseline MRR be *p0* (measure from pre-period; typical might be 0.55–0.75 depending on cohort).
+- Choose a minimum detectable effect **MDE** that is *meaningful and safe*, e.g. **+1.0–2.0% absolute** improvement, and a **non-inferiority margin** for safety (e.g., not worse than −1% absolute).
+- Approximate per-arm sample size using a two-proportion heuristic:
+  - \(n \approx 16 \cdot p(1-p) / \text{MDE}^2\) for 80% power at ~5% alpha (order-of-magnitude planning).
+- Prefer **sequential monitoring with conservative thresholds** (e.g., weekly looks) to catch harm early without over-optimizing p-values.
 
-### Rollout
-- Gradual ramp post-success: 5% → 25% → 50% → 100% of eligible users
-- Default-on for bundling in high-volume cohorts; offer opt-out
+### 6.5 Analysis plan (what to look at)
+- **Primary comparisons:**
+  - T1 vs Control (does bundling help without harming mentions?)
+  - T2 vs T1 (incremental value of focus presets)
+- **Segmentation cuts (pre-registered):**
+  - mobile-heavy vs desktop-heavy
+  - very-high volume vs medium-high volume
+  - time zones / working hours
+  - “incident channel override” users vs non-users
+- **Spillover checks:**
+  - workspace-level aggregates (response times, DM share) to detect second-order effects.
+
+### 6.6 Guardrails + stop rules (operational)
+Stop / rollback or freeze ramp if any trigger hits for 24h+:
+- **MRT p90** for direct @mentions worsens by **>5% relative** vs control (or crosses an absolute SLO).
+- **Critical miss proxy** increases by **>X%** (define: @mentions not opened within Y minutes during working hours).
+- **Notification permissions disablement** increases by **>Z%** vs control.
+- **Opt-out / “Always immediate” override spikes** beyond threshold (trust regression signal).
 
 ---
 
-## 7) Risks, mitigations, open questions
+## 7) Rollout & kill-switch plan
+### Rollout principles
+- Ship behind **server-controlled feature flags** with per-user assignment and per-workspace allowlisting.
+- Separate flags so we can disable specific components without tearing down the whole system:
+  - `bundling_enabled`
+  - `catchup_view_enabled`
+  - `focus_modes_enabled`
+  - `incident_channel_immediate_override_enabled`
+  - `ranking_labels_enabled`
+
+### Ramp plan (post-experiment)
+1. **0% (dark launch):** decisioning + logging on, user-visible changes off. Validate event quality + latency.
+2. **5% → 10%:** eligible users only, default-on bundling with clear opt-out.
+3. **25%:** only if acceptance criteria D (non-inferiority + guardrails) holds.
+4. **50%:** expand eligibility threshold downward (include more “medium volume” users) only after stability.
+5. **100% of eligible users:** then consider defaulting on for all users in high-volume workspaces.
+
+### Kill-switch (what, who, how fast)
+- **What we can shut off:**
+  - Immediate: disable bundling decisioning (revert to baseline delivery) and/or hide catch-up UI.
+  - Scoped: disable for a single workspace, platform, app version, or cohort.
+- **Who can activate:** on-call product/eng via standard Slack incident process (document owner + backup).
+- **Target time-to-mitigate:**
+  - server-side flag flip reflected to clients **p95 ≤5 minutes**
+  - if client caching exists, force refresh on next notification evaluation.
+
+### Rollback verification checklist
+- Mention notifications confirmed immediate in treated cohort (spot-check + logs).
+- Bundles cease generating (`bundle_digest_created` drops to ~0).
+- Any queued digests are either delivered as immediate notifications or dropped with user-visible explanation (choose consistent policy; do not silently lose).
+
+---
+
+## 8) Risks, mitigations, open questions
 ### Risks
 1. **Bundling delays time-sensitive non-mentions** (e.g., incident chatter).
 2. **Users lose trust** if they feel Slack is “hiding messages.”
