@@ -2,14 +2,15 @@
 
 **Product:** Slack (Messaging)
 **Author:** Mayank Malviya
-**Status:** v2 — execution-ready PRD (deeper experiment + rollout plan)
+**Status:** v3 — final PRD (executable spec for “Needs your response” + explainability)
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/slack-messaging-teardown.md
 
 ---
 
 ## Version history
 - **v1 (initial):** Problem framing, core solution (bundling + focus modes + lightweight “needs you” labeling), baseline metrics + basic experiment outline.
-- **v2 (this revision):** Adds **user stories & acceptance criteria**, **rigorous experiment design** (randomization, segmentation, power heuristics, ramp), and a detailed **rollout + kill-switch plan** to safely ship load-shaping.
+- **v2:** Adds **user stories & acceptance criteria**, **rigorous experiment design** (randomization, segmentation, power heuristics, ramp), and a detailed **rollout + kill-switch plan** to safely ship load-shaping.
+- **v3 (this revision / final):** Turns **“Needs your response”** into an executable spec: explicit scope boundaries, V1 heuristic classifier + ML progression path, offline + online evaluation plans with targets, failure modes/mitigations, and an **explainability + user-control UX contract**.
 
 ## 0) One-liner + context
 Build **Notification Load Shaping** to help Slack users stay responsive to what matters (mentions, threads they’re involved in, high-signal channels) while **reducing notification fatigue** in busy workspaces.
@@ -140,22 +141,205 @@ We will shape notification delivery using three tightly-related capabilities:
 
 ---
 
-### 4.3 “Needs your response” classification (ranking, not new social norms)
-We need a lightweight classifier to label items in digests/catch-up:
-- **Needs you:**
-  - direct @mention
-  - reply to the user in a followed thread
-  - message that includes the user’s name + question mark (heuristic)
-  - message in a channel where user is the only/one of few active responders (behavioral heuristic)
-- **Active:** high activity thread/channel but not clearly addressed to user
-- **FYI:** low urgency / broadcast-style updates
+### 4.3 “Needs your response” (NYR) — executable spec (ranking + flagging, not new social norms)
+This section defines what **qualifies as “Needs your response”**, how we compute it in V1, how we evaluate it, and the UX/explainability contract that keeps it trustworthy.
 
-This classification powers:
-- Digest ranking
-- Catch-up view ordering
-- Optional “nudge” badge in the sidebar (“2 need you”)
+#### 4.3.1 Definition
+A message or thread state is **Needs your response** if, based on **observable conversation structure and the user’s relationship to the thread**, it is **more likely than not** that *the next productive step requires action from the user* (reply, reaction-as-ack, or a short follow-up).
 
-**Important:** We are not introducing a new sender-side “urgency” taxonomy in V1 (no intent picker here) to avoid friction and norm complexity.
+We treat NYR as a **ranking signal + label** used in:
+- digest previews (top items)
+- catch-up view ordering
+- optional sidebar badge (“N need you”) and/or section
+
+NYR is **not**:
+- a sender-defined urgency marker
+- a guarantee that something is urgent
+- a commitment that Slack will never miss an ask (we still rely on direct mentions/DMs as the safest primitives)
+
+#### 4.3.2 Scope boundaries (what qualifies / does not)
+**Qualifies (high-confidence):**
+1. **Direct @mention to the user** in a channel message.
+2. **DMs** to the user (or small group DM where the user is addressed).
+3. **Thread reply** that directly addresses the user when:
+   - the user is explicitly mentioned in the reply, OR
+   - the reply is in a thread the user follows / has participated in recently (see “thread state” features).
+4. **Explicit question directed at the user** using simple, observable cues (heuristics): user name/handle + question mark, or short interrogatives (“can you…”, “could you…”, “do you know…”) in proximity to the user reference.
+5. **Ownership/role cues** where the user is the obvious responder based on prior behavior in that channel/thread (e.g., the user has been the primary responder for similar asks in that channel recently).
+
+**Does NOT qualify (by default):**
+- **Broadcast updates** without a directed ask (release notes, FYIs, announcements).
+- Messages that contain a question but are **not addressed** to the user and occur in a large channel.
+- Threads where the user was mentioned historically but the conversation has moved on and another person is actively responding.
+- Automated/integration messages that look like asks but are machine-generated (handled as a separate initiative; we may down-rank them heuristically).
+- “Loud” channels with high activity where directed asks are ambiguous; these should fall into **Active** rather than NYR.
+
+**Ambiguous cases (allowed, but must be explainable and correctable):**
+- “Can someone…” questions in channels where the user typically responds.
+- Incident/war-room chatter where response responsibility is shared (may be NYR only when the user is @mentioned / on-call mode engaged / channel set to immediate).
+
+#### 4.3.3 Output labels and contract
+We expose a three-bucket label on catch-up items:
+- **Needs your response** (NYR)
+- **Active** (high activity / context-building)
+- **FYI** (low urgency, informational)
+
+**Contract:**
+- NYR labeling must be **high precision** (avoid crying wolf). If unsure, classify as **Active**.
+- “Why” must be available for any NYR label shown to the user (see §4.3.7).
+- Users can correct it (see §4.3.8); corrections feed future ranking.
+
+#### 4.3.4 Feature list (grounded in observable behavior)
+We intentionally restrict to features that can be derived from message metadata, thread graph, and user interaction history—no proprietary org signals.
+
+**A) Message-level signals**
+- mention type: direct @mention of user; @here/@channel; user name token (if visible)
+- DM vs channel message
+- punctuation/structure: presence of question mark; short interrogative patterns (regex-based)
+- request verbs (lightweight pattern set): “please”, “can you”, “could you”, “need”, “review”, “approve”, “take a look”
+- message length and link/file presence (often FYI vs ask; used cautiously)
+- sender relationship: frequent dyad interactions with user (prior reply rate), recency of 1:1 interactions
+
+**B) Channel metadata signals**
+- channel size (member count bucket)
+- channel priority setting (user-set “High priority”; “Always immediate”)
+- channel recent volume (messages/hour) and burstiness
+- channel type: public/private; DM vs group DM
+
+**C) Thread state signals**
+- is message a thread reply vs root
+- whether user follows the thread
+- whether user has posted in the thread (participation)
+- time since user’s last contribution in thread
+- whether someone else has responded after the ask (may de-escalate NYR)
+- reply count growth after ask (if multiple responders, likely Active)
+
+**D) User behavior signals (per-user personalization, bounded + interpretable)**
+- user’s historical response likelihood to sender/channel (reply or reaction within X hours)
+- user’s typical responsiveness by time-of-day/day-of-week (used for ranking, not for suppressing directed asks)
+- explicit user feedback signals: “Not relevant”, “Snooze”, “Always immediate in this channel”
+
+#### 4.3.5 Baseline V1 heuristic approach (ship-ready)
+V1 uses a **rule-based scoring model** that produces:
+- `nyr_score ∈ [0,1]`
+- `nyr_label ∈ {NYR, Active, FYI}` with conservative thresholds
+
+**High-level algorithm (illustrative):**
+1. **Hard positives (NYR = true):**
+   - direct @mention to user → NYR
+   - DM to user → NYR
+2. **Thread-directed asks:**
+   - if thread reply AND (user mentioned OR thread followed/participated) THEN add score
+3. **Question / request cues:**
+   - if (user referenced) AND (question/request pattern) THEN add score
+4. **De-escalation rules (reduce false positives):**
+   - if channel is large + message is not a direct mention + ask is generic (“anyone”, “someone”) → cap score
+   - if another user has already replied meaningfully after the ask (within short window) → reduce score
+   - if sender is high-volume in that channel and user rarely responds → reduce score
+5. **Bucketing:**
+   - NYR if `score ≥ 0.75`
+   - Active if `0.35 ≤ score < 0.75`
+   - FYI if `< 0.35`
+
+**Why heuristics first:**
+- deterministic + debuggable
+- easy to gate with safety rails (“if unsure → Active”)
+- provides labeled data + user feedback to bootstrap ML later
+
+#### 4.3.6 Progression path to ML (optional, after V1 proves value)
+Once V1 ships and generates reliable training data (with user corrections), we can move to a supervised model.
+
+**ML scope (incremental, not a rewrite):**
+- Replace parts of the heuristic score with a model score while keeping:
+  - hard-positive rules (direct @mentions, DMs)
+  - conservative thresholds
+  - explainability mapping (“top factors”)
+
+**Candidate models:**
+- V2: logistic regression / gradient-boosted trees using the feature set above (fast, interpretable)
+- V3+: lightweight text embedding model for message intent (only if privacy + performance constraints allow)
+
+**Training labels (observable + scalable):**
+- positive label if user replies or reacts (ack) within a working-time window (e.g., 4 business hours) AND the message had directed cues
+- negative label if user sees the message (open/click/thread view) but does not respond within window
+- incorporate user feedback (“Not relevant”) as strong negatives
+
+#### 4.3.7 Offline evaluation (NYR quality) + targets
+We evaluate NYR as a **binary classification** at a chosen threshold and also as a **ranking problem**.
+
+**Datasets:**
+- sample of messages/threads from eligible high-volume users (stratified by channel size, platform, role proxy)
+- exclude purely automated integration channels if feasible (or track as separate slice)
+
+**Metrics:**
+- **Precision@NYR** (primary): of items labeled NYR, % that receive a user response within window
+- **Recall@NYR** (secondary): of items that truly required response, % labeled NYR
+- **Calibration:** reliability curve for `nyr_score` (predicted vs observed response rate)
+- **Ranking quality:** NDCG@K for catch-up lists (K=5,10)
+
+**Target thresholds (V1 ship targets; tune in alpha):**
+- Precision@NYR ≥ **0.70** overall; ≥ **0.60** in large channels
+- Recall@NYR ≥ **0.50** (acceptable to miss ambiguous asks; they should land in Active)
+- Calibration: top score bucket (≥0.8) observed response rate ≥ **0.75**
+
+*(These are intentionally conservative; trust is the gating constraint.)*
+
+#### 4.3.8 Online evaluation plan (product impact + trust)
+NYR affects both **attention routing** and **user trust**. We evaluate it separately from bundling when possible.
+
+**Online metrics (NYR-specific):**
+- **Time-to-first-response** for NYR-labeled items (median, p90) vs control ordering
+- **Catch-up action rate:** % of digest opens leading to action on a NYR item within 5 minutes
+- **Trust/quality signals:**
+  - rate of “Not relevant” on NYR items (lower is better)
+  - rate of “Why am I seeing this?” opens followed by disabling/opt-out (watch for spikes)
+  - net opt-out from NYR labels / sidebar badge
+
+**Hypotheses:**
+- NYR ranking reduces time-to-action on true asks without increasing total interruptions.
+
+**Experiment approach:**
+- within treated bundling cohorts, randomize **ordering + label visibility**:
+  - A: NYR labels shown + NYR-based ranking
+  - B: NYR-based ranking only (no label)
+  - C: baseline ranking (control)
+
+#### 4.3.9 Failure modes + mitigations
+1. **False positives (“cry wolf”)**
+   - Mitigation: high precision threshold; default uncertain items to Active; easy “Not relevant” feedback; show clear “why”.
+2. **Bias toward loud senders / high-volume channels**
+   - Mitigation: cap score in large channels unless directly addressed; sender-volume normalization; per-channel de-escalation.
+3. **Incident channels / war-room dynamics**
+   - Mitigation: if channel is set “Always immediate” or user is in On-call focus mode, treat channel chatter as Active (not NYR) unless directly addressed; avoid flooding NYR.
+4. **Reinforcing responsiveness inequality** (model learns “user responds to X, so rank X higher”)
+   - Mitigation: personalization is bounded; always keep structural cues (mentions/questions) dominant; monitor slices by sender type and channel size.
+5. **Gaming** (senders add question marks or name tokens)
+   - Mitigation: require multiple signals (address + question + relationship/thread state); rate-limit repeated low-quality asks from same sender/channel via de-escalation.
+6. **Cold start** for new users/channels
+   - Mitigation: fall back to global heuristics; require direct address for NYR; gradually incorporate behavior.
+
+#### 4.3.10 Explainability / UX contract + user controls
+**Explainability surfaces (minimum viable):**
+- On each NYR-labeled item in Catch-up: a “Why” affordance that opens a short explanation.
+- Explanations must be **specific, non-creepy, and actionable** (avoid opaque phrasing).
+
+**Standard explanation templates (examples):**
+- “You were @mentioned.”
+- “You replied in this thread recently.”
+- “This message asks you a question (mentions your name).”
+- “You often respond in #support.” *(only if we can phrase it safely; otherwise omit behavioral phrasing and stick to thread/channel facts)*
+
+**User controls to correct the system (must exist wherever NYR is shown):**
+- **Not relevant** (demote this item; reduces similar future NYR candidates)
+- **Snooze NYR** (mute NYR badge/digest prominence for 1h / today)
+- **Always show NYR from this channel** / **Never show NYR from this channel** (bounded channel-level preference)
+- **Undo** for any of the above (short window)
+
+**Data/behavior contract:**
+- User feedback must affect ranking within a short time window (target: within 24h; ideally immediate for the same channel).
+- We do not expose private scores; we expose **reasons** and **controls**.
+
+---
 
 ---
 
@@ -220,6 +404,9 @@ New/updated events (illustrative names):
 - `bundle_digest_created` (count of items, channels, ranking features)
 - `bundle_digest_opened`
 - `catchup_item_clicked` (entity=channel|thread|message)
+- `nyr_labeled` (score_bucket, label, reasons=[...], entity=message|thread)
+- `nyr_why_opened` (entity, label)
+- `nyr_feedback` (action=not_relevant|snooze|always_show|never_show, scope=message|thread|channel, undo_used)
 - `focus_mode_enabled/disabled` (mode, duration, auto_revert)
 - `channel_priority_changed` (high_priority on/off)
 - `mention_received` + `mention_responded` (response_type=reaction|reply)
