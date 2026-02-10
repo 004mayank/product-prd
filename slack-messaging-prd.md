@@ -2,7 +2,7 @@
 
 **Product:** Slack (Messaging)
 **Author:** Mayank Malviya
-**Status:** v3 — final PRD (executable spec for “Needs your response” + explainability)
+**Status:** v3 - final 
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/slack-messaging-teardown.md
 
 ---
@@ -12,10 +12,10 @@
 - **v2:** Adds **user stories & acceptance criteria**, **rigorous experiment design** (randomization, segmentation, power heuristics, ramp), and a detailed **rollout + kill-switch plan** to safely ship load-shaping.
 - **v3 (this revision / final):** Turns **“Needs your response”** into an executable spec: explicit scope boundaries, V1 heuristic classifier + ML progression path, offline + online evaluation plans with targets, failure modes/mitigations, and an **explainability + user-control UX contract**.
 
-## 0) One-liner + context
+## Context
 Build **Notification Load Shaping** to help Slack users stay responsive to what matters (mentions, threads they’re involved in, high-signal channels) while **reducing notification fatigue** in busy workspaces.
 
-Slack’s value compounds when its attention-routing loop is reliable: a message is seen, the right person responds quickly, and work unblocks. Today, many users respond by muting, ignoring, or batch-checking Slack—hurting loop reliability.
+Slack’s value compounds when its attention-routing loop is reliable: a message is seen, the right person responds quickly, and work unblocks. Today, many users respond by muting, ignoring, or batch-checking Slack-hurting loop reliability.
 
 ---
 
@@ -76,7 +76,7 @@ We will shape notification delivery using three tightly-related capabilities:
 ### 4.1 UX: Smart Bundling (non-mention channel chatter)
 **Principle:** Mentions remain immediate (with safeguards). Non-mention notifications are bundled into predictable digests so users get fewer interruptions and higher signal.
 
-#### Flow A — On receiving non-mention messages
+#### Flow A - On receiving non-mention messages
 1. User is a member of channel C.
 2. Messages arrive that would normally generate a notification for the user (based on their current settings) but are:
    - not direct @mentions,
@@ -88,7 +88,7 @@ We will shape notification delivery using three tightly-related capabilities:
    - Body: top 2–3 items (ranked), e.g. “#proj-alpha: 3 new messages • #support: 7 new • 2 threads active”
    - CTA buttons: **View digest**, **Snooze bundles for 1h**, **Tune**
 
-#### Flow B — Opening the digest
+#### Flow B - Opening the digest
 1. Tapping the digest opens a “Catch up” view:
    - Ranked list of channels/threads with short previews.
    - Clear labels: **Needs you** (see classification), **Active**, **FYI**.
@@ -108,7 +108,7 @@ We will shape notification delivery using three tightly-related capabilities:
 
 #### Edge cases
 - **Incident / war room channels:** Users may want immediate non-mention chatter. Provide per-channel override: “Always notify immediately in this channel.”
-- **Low connectivity / mobile battery:** Bundles reduce notification spam—should be net-positive.
+- **Low connectivity / mobile battery:** Bundles reduce notification spam-should be net-positive.
 - **Quiet hours:** Bundles should respect existing Do Not Disturb; deliver a single catch-up summary upon exit.
 
 ---
@@ -116,7 +116,7 @@ We will shape notification delivery using three tightly-related capabilities:
 ### 4.2 UX: Focus Mode presets (Deep work / On call / In meetings)
 **Principle:** Users need a simple, reversible way to change notification posture as their day context changes.
 
-#### Flow C — Enabling a focus mode
+#### Flow C - Enabling a focus mode
 1. User opens profile/status menu → sees **Focus modes** row.
 2. Picks a mode:
    - **Deep work:** only DMs + direct @mentions; bundles everything else.
@@ -141,7 +141,7 @@ We will shape notification delivery using three tightly-related capabilities:
 
 ---
 
-### 4.3 “Needs your response” (NYR) — executable spec (ranking + flagging, not new social norms)
+### 4.3 “Needs your response” (NYR) - executable spec (ranking + flagging, not new social norms)
 This section defines what **qualifies as “Needs your response”**, how we compute it in V1, how we evaluate it, and the UX/explainability contract that keeps it trustworthy.
 
 #### 4.3.1 Definition
@@ -190,7 +190,7 @@ We expose a three-bucket label on catch-up items:
 - Users can correct it (see §4.3.8); corrections feed future ranking.
 
 #### 4.3.4 Feature list (grounded in observable behavior)
-We intentionally restrict to features that can be derived from message metadata, thread graph, and user interaction history—no proprietary org signals.
+We intentionally restrict to features that can be derived from message metadata, thread graph, and user interaction history-no proprietary org signals.
 
 **A) Message-level signals**
 - mention type: direct @mention of user; @here/@channel; user name token (if visible)
@@ -432,12 +432,12 @@ Ensure consistent `workspace_id`, `user_id`, `surface`, `channel_id`, `thread_ro
 *(Optional later)* **T3 (Bundling + Focus + stronger ranking):** gated behind separate classifier iteration; avoid mixing algorithm changes with delivery changes in the first powered test.
 
 ### 6.3 Ramp + duration
-- **Phase 0 — Dogfood / internal alpha (1–2 weeks):**
+- **Phase 0 - Dogfood / internal alpha (1–2 weeks):**
   - Validate: no critical mention misses; digest UX; cross-device state consistency.
   - Confirm logging completeness for all primary metrics + guardrails.
-- **Phase 1 — External beta (1–2 weeks):**
+- **Phase 1 - External beta (1–2 weeks):**
   - **5% ramp** of eligible users (with opt-out) to validate guardrails at small scale.
-- **Phase 2 — Powered A/B/n (2–4+ weeks):**
+- **Phase 2 - Powered A/B/n (2–4+ weeks):**
   - Ramp to **25% / 25% / 50%** (T1/T2/Control) or **33/33/34** depending on desired compare.
   - Run long enough to cover weekday cycles and “return after absence” patterns (at least 2 full work weeks).
 
