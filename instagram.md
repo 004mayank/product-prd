@@ -2,13 +2,20 @@
 
 **Product:** Instagram (DMs)  
 **Author:** Mayank Malviya  
-**Status:** v2 — prioritized requirements, UX surfaces, analytics schema, rollout gates  
+**Status:** v3 — shipped-ready spec (final thresholds, copy, dependencies, go/no-go)  
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/instagram-dms-teardown.md
 
 ---
 
 ## Changelog
-### v2 (this revision)
+### v3 (this revision)
+- Finalized **eligibility logic** (scoring + caps) for *Needs reply* and *Open loops*.
+- Added **user-facing copy options**, recommended default strings, and “tone” constraints.
+- Added **go/no-go launch criteria**, monitoring, and stop conditions.
+- Added **dependencies** + implementation notes (client vs server, storage, flags).
+- Resolved key open questions with recommendations.
+
+### v2
 - Converted “proposed solutions” into **P0/P1 requirements** with **acceptance criteria**.
 - Added a concrete **information architecture** for: *Needs reply* state, *Requests triage*, *Open loops* module.
 - Added **analytics/event schema**, experiment design details, and guardrail definitions.
@@ -51,6 +58,7 @@ Observable PM problem: **high-intent inbound messages are missed or replied to l
 - Turning DMs into a full email-like inbox for all users (labels/rules/workflows at parity with email).
 - Building heavy content understanding that requires claiming internal ML capabilities.
 - Solving spam end-to-end; this PRD focuses on **triage + reply completion**, not adversarial abuse systems.
+- Reordering inbox globally (ranking/priority inbox) in V3; we stick to **light indicators + modules**.
 
 ---
 
@@ -59,7 +67,7 @@ Observable PM problem: **high-intent inbound messages are missed or replied to l
 2. **Small businesses / prosumers:** DMs are a sales/support channel; missed replies = lost revenue.
 3. **Everyday users:** mostly social; still experience message requests + missed “important” pings.
 
-**Primary target for V2 experiments:** Creators + SMBs (highest volume, highest cost of missed replies).  
+**Primary target for launch:** Creators + SMBs (highest volume, highest cost of missed replies).  
 **Secondary:** Everyday users (ensure UX doesn’t add anxiety/clutter).
 
 ---
@@ -67,9 +75,9 @@ Observable PM problem: **high-intent inbound messages are missed or replied to l
 ## 4) Key insights
 - The DM list is effectively a **work queue** for high-intent users; when it’s noisy, the queue collapses.
 - Story replies are both **high-signal** (contextual) and **high-volume** (overload risk).
-- Users can tolerate some “assistance UI,” but not pressure/anxiety; any prioritization must be subtle and dismissible.
+- Users can tolerate assistance, but not pressure; prioritization must be subtle, optional, and reversible.
 
-**Operational definition (for V2):** “High-intent” = inbound messages that are (a) recent, (b) unreplied-to, and (c) higher likelihood of needing action based on *explicit* context (story reply, request inbox, mentions) + lightweight text heuristics (question mark / short request templates) — **not** deep semantic interpretation.
+**Operational definition:** “High-intent” = inbound messages that are (a) recent, (b) unreplied-to, and (c) higher likelihood of needing action based on *explicit* context + lightweight heuristics — **not** deep semantic interpretation.
 
 ---
 
@@ -87,188 +95,197 @@ Observable PM problem: **high-intent inbound messages are missed or replied to l
 ### Guardrails
 - **Spam reports / blocks** (ensure we don’t amplify spam).
 - **Mute/leave** rate for DM groups.
-- **Notification disablement / opt-out** (if we introduce any nudges).
-- **Wrong-priority rate**: user dismisses/deprioritizes surfaced items.
-- **DM list “urgency saturation”**: % of threads marked Needs reply (cap to avoid everything looking urgent).
+- **Notification disablement / opt-out** (we do not introduce new push in V3; still monitor).
+- **Wrong-priority rate:** user marks handled/dismisses surfaced items without replying.
+- **Urgency saturation:** share of visible threads labeled *Needs reply*.
 
 ---
 
 ## 6) Scope & target user journeys
 
-### Target journey A: inbound message → seen → replied
-Trigger (inbound DM / story reply / request) → user opens IG → goes to DMs → finds the message → replies → continues thread
+### Journey A: inbound message → seen → replied
+Inbound DM/story reply/request → user opens IG → goes to DMs → finds the message → replies → continues
 
-Key failure modes:
-- User doesn’t see the message (notification/overload).
-- User sees it but can’t tell what’s important.
-- User intends to reply but loses the thread later (no “open loops” memory).
-- Legitimate messages are buried under spam/requests.
+Failure modes:
+- User doesn’t see it (notification/overload).
+- User sees it but can’t tell what matters.
+- User intends to reply but loses it across sessions.
+- Legit messages buried under spam/requests.
 
-### Target journey B: requests inbox → first action → converted to a reply (or safely removed)
+### Journey B: requests inbox → first action → converted to reply (or safely removed)
 Request arrives → user opens Requests → identifies legit vs spam → Accept/Delete/Report → if accepted, reply
 
 ---
 
-## 7) Proposed solutions → requirements (v2)
+## 7) Solutions → requirements (v3)
 
 ### Solution 1: “Needs reply” state for DMs (lightweight prioritization)
 **User promise:** “When you open DMs, it’s obvious which threads are waiting on you.”
 
 #### P0 requirements
-- **FR1 — Needs reply eligibility:** System must mark a thread as *Needs reply* when:
-  - last message is inbound (from other user), and
-  - no outbound message sent after that inbound, and
-  - thread is within recency window (e.g., last inbound ≤ 7 days), and
-  - passes conservative triggers (story reply context OR question mark OR common request templates), and
-  - thread is not muted/archived/restricted/blocked.
-- **FR2 — Visibility:** System must render a subtle *Needs reply* indicator in the DM list row.
-- **FR3 — Dismiss/Mark handled:** System must allow user to remove the indicator per-thread (e.g., “Mark as handled”).
-- **FR4 — Saturation protection:** System must cap the number (or %) of threads labeled *Needs reply* in the visible list (avoid “everything is urgent”).
-- **FR5 — Persistence:** Dismissed state must persist across sessions for a reasonable duration (e.g., until new inbound arrives or 14 days).
+- **FR1 — Eligibility (rules + scoring):** System must mark a thread as *Needs reply* if it is **eligible** and passes a conservative **score threshold**.
+  - **Hard eligibility gates (must all be true):**
+    - last message inbound (other user)
+    - no outbound message after that inbound
+    - last inbound age ≤ **7 days** (default; tunable)
+    - thread not muted/archived
+    - counterparty not blocked
+    - thread not in restricted/sensitive states (per policy)
+  - **Score model (additive, no semantics):**
+    - +3: inbound is a **Story reply** (explicit context)
+    - +2: message is in **Primary** inbox (not Requests)
+    - +2: contains `?` (question mark)
+    - +2: sender is **verified**
+    - +1: **mutual follow** / strong graph signal available
+    - +1: inbound age ≤ 24h
+  - **Threshold:** mark as Needs reply when score ≥ **4**.
+- **FR2 — Visibility:** Must render a low-salience row indicator in DM list.
+- **FR3 — Mark handled:** Must allow user to remove indicator per thread.
+- **FR4 — Saturation cap:** Must cap Needs reply to avoid “everything urgent”.
+  - Default: show at most **min(5, 10% of first screen threads)**.
+- **FR5 — Persistence:** Mark-handled state persists until (a) new inbound arrives or (b) 14 days.
 
 #### P1 requirements
-- **FR6 — Creator/SMB tuning:** System should allow different thresholds for high-volume users (creators/SMBs) vs everyday users.
-- **FR7 — Explainability (light):** System may show a lightweight reason for the label in overflow (“Marked because: Story reply” / “Question”).
+- **FR6 — Segment tuning:** Support different caps/thresholds for high-volume users.
+  - Creators/SMBs default: same threshold (≥4) but cap can be higher (e.g., max 7) if saturation remains low.
+- **FR7 — Explainability (light):** Optional “Why this?” with *explicit* reason (Story reply / Question / Verified).
 
 #### Acceptance criteria (samples)
-- Given a thread with last inbound “?” within 7 days and no reply, when user opens DM list, then the thread shows *Needs reply*.
-- Given a muted thread, when last message is inbound, then the thread is not labeled.
-- Given user taps “Mark handled”, when user leaves and returns to DMs, then the label stays removed until new inbound arrives.
+- Given a story reply received 2h ago and unreplied, when opening DM list, then it is labeled Needs reply.
+- Given a thread with inbound older than 7 days, it is not labeled.
+- Given user marks handled, the label disappears and stays off until new inbound.
 
 ---
 
-### Solution 2: Message Requests triage assist (reduce time-to-first-action)
+### Solution 2: Message Requests triage assist
 **User promise:** “Requests are quicker to clear, and legit requests are easier to spot.”
 
 #### P0 requirements
-- **FR8 — Faster first action:** System must present clear one-tap actions in Requests: **Accept**, **Delete**, **Report/Block** (names per policy).
-- **FR9 — Signal surfacing:** System must show a compact set of *explicit* trust/context signals where available (e.g., verified badge, mutual followers, shared groups, prior interactions).
-- **FR10 — Likely spam bucket (no new ML claims):** System must support a separate “Likely spam” view based on existing classification/signals.
-- **FR11 — Logging:** System must log which signals were shown and which action was taken (for learning + audit).
+- **FR8 — One-tap actions:** Requests must expose Accept, Delete, Report/Block with minimal friction.
+- **FR9 — Trust/context signals:** Must show explicit signals (verified, mutuals, shared groups, prior interaction) when available.
+- **FR10 — Likely spam bucket:** Must support separate “Likely spam” view using existing classification.
+- **FR11 — Logging:** Must log action taken + which signals were displayed.
 
 #### P1 requirements
-- **FR12 — Bulk handling:** System should support multi-select + bulk delete/report for power users.
-
-#### Acceptance criteria (samples)
-- Given a request from a verified account with mutual followers, when user opens Requests, then signals render and Accept is available without extra taps.
-- Given a request classified as spam, when user opens Requests, then it appears in Likely spam (not mixed into primary requests).
+- **FR12 — Bulk handling:** Multi-select + bulk delete/report for power users.
 
 ---
 
-### Solution 3: “Open loops” resurfacing module (since you were away)
+### Solution 3: “Open loops” resurfacing module
 **User promise:** “After time away, DMs help you pick up where you left off.”
 
 #### P0 requirements
-- **FR13 — Entry condition:** System must show an *Open loops* module only when (a) there are true open loops and (b) user has been away long enough (e.g., last DM session > 6h) to justify the surface.
-- **FR14 — Contents (explicit signals only):** Module must include:
-  - threads marked Needs reply,
-  - pending Message Requests not acted on,
-  - mentions/replies-to-you in group contexts (where explicit).
-- **FR15 — Dismiss:** Module must be dismissible, and dismissal must persist for the session.
-
-#### P1 requirements
-- **FR16 — Frequency caps:** Module should not appear more than once per day unless open loops exceed a threshold.
-
-#### Acceptance criteria (samples)
-- Given user has 3 Needs reply threads and last DM open was > 6h, when entering DMs, then Open loops module shows those threads.
-- Given user dismisses module, when they go back to DM list within session, then module stays hidden.
+- **FR13 — Show only when justified:** Open loops module appears only if:
+  - last DM session > **6h**, and
+  - open loops count ≥ **2** (or ≥1 for creator/SMB), and
+  - not shown already in last **24h** (frequency cap).
+- **FR14 — Contents (explicit only):** Needs reply threads + pending Requests + explicit mentions in group contexts.
+- **FR15 — Dismiss:** Dismiss hides for session; do not re-show until next day unless open loops spike (e.g., +5).
 
 ---
 
-## 8) UX surfaces (v2)
+## 8) UX spec (v3)
 
 ### A) DM list row
-- Add a small, low-salience pill/label: “Needs reply” (copy TBD).
-- Keep existing ordering; do **not** reorder the whole inbox in V2 (reduces risk).
+- Indicator: small pill.
+- No reordering in V3.
+
+**Recommended default copy:**
+- Pill: **“Reply”** (preferred) or “Needs reply” (fallback).
+  - Rationale: “Reply” reads as an action, not judgment.
 
 ### B) Thread overflow actions
-- “Mark handled” (removes Needs reply)
-- Optional: “Why am I seeing this?” (only if policy/UX approves)
+- Primary: **Mark handled**
+- Optional: “Why this?” → sheet with 1 reason string.
 
 ### C) Requests inbox
-- A compact “trust context” row (verified/mutuals/etc.)
-- One-tap actions surfaced without scrolling
-- Separate “Likely spam” tab/bucket
+- Signals row: Verified / Mutuals / Shared followers / Prior interaction.
+- Buttons: Accept, Delete, Report.
+- Tabs: Requests | Likely spam.
 
-### D) DM entry module: Open loops
-- Compact module at top, collapsible/dismissible
-- 3–5 items max; link to “See all” if needed
+### D) Open loops module (DM entry)
+- Title copy options (choose 1):
+  - **“To reply”** (recommended)
+  - “Waiting on you” (risk: guilt)
+  - “Pick up where you left off” (longer)
+- Body: list 3–5 items max + “See all”.
+
+**Tone constraints (must):**
+- No guilt language (“You haven’t replied…”, “Don’t forget…”) in V3.
+- No red badges/counts for this feature in V3.
 
 ---
 
-## 9) Analytics & experimentation (v2)
+## 9) Analytics & experimentation (v3)
 
 ### Event schema (minimal)
-**All events should include:** user_id hash, surface (dm_list / requests / dm_entry), experiment_variant, timestamp.
+All events include: user_id hash, surface, experiment_variant, timestamp.
 
-- `dm_needs_reply_impression` (thread_id, eligibility_reason)
+- `dm_needs_reply_impression` (thread_id, reason: story_reply|question|verified|graph)
 - `dm_needs_reply_mark_handled` (thread_id)
 - `dm_thread_open` (thread_id, from_surface)
-- `dm_reply_send` (thread_id, message_type)
+- `dm_reply_send` (thread_id)
 
-- `dm_requests_view` (tab: requests|likely_spam)
-- `dm_request_action` (request_id, action: accept|delete|report|block, signals_shown[])
+- `dm_requests_view` (tab)
+- `dm_request_action` (request_id, action, signals_shown[])
 
 - `dm_open_loops_impression` (count_threads, count_requests)
-- `dm_open_loops_dismiss` (reason_optional)
-- `dm_open_loops_click_item` (item_type: thread|request)
+- `dm_open_loops_dismiss`
+- `dm_open_loops_click_item` (item_type)
 
-### Experiments
-- **Experiment A — Needs reply marker**
-  - Control: current DM list
-  - Variant: needs-reply label + mark handled + caps
-  - Success: ↓ median TTFR, ↑ CCR (24h)
-  - Guardrails: wrong-priority rate, saturation, reports/blocks
+### Experiment design
+- Randomization unit: user.
+- Ramp: 0% → employee/dogfood → 1% → 5% → 25% → 50% → 100%.
+- Target cohort first: creators/SMBs.
 
-- **Experiment B — Requests triage assist**
-  - Success: ↓ time-to-first-action, ↑ acceptance-to-reply conversion (where measurable)
-  - Guardrails: spam surfaced to Primary, increased spam engagement
+### Go/no-go criteria (measured vs control)
+Ship from 25% → 50% only if all true for 7 days:
+- **TTFR median:** improves by **≥2%** OR **CCR (24h)** improves by **≥1%**.
+- **Guardrails:** reports/blocks do not increase by > **0.5% relative**.
+- **Urgency saturation:** ≤ **10%** of first-screen threads labeled.
+- **Wrong-priority:** mark-handled without reply ≤ **40%** of needs-reply interactions (baseline to be established at 1–5%).
 
-- **Experiment C — Open loops module**
-  - Success: ↑ open→reply conversion, ↑ DM return rate
-  - Guardrails: dismiss rate, “anxiety signals” proxy (rapid dismiss + reduced session length)
-
----
-
-## 10) Privacy, integrity, and safety (v2)
-- **Spam amplification risk:** Prioritization could surface adversarial messages.
-  - Mitigation: conservative eligibility; exclude restricted/low-trust; integrate existing spam classifications; monitor reports/blocks.
-- **User anxiety / guilt risk:** “Needs reply” can create obligation.
-  - Mitigation: subtle UI; user control (mark handled); caps; avoid pushy notifications in V2.
-- **Data minimization:** Prefer explicit signals and lightweight heuristics; avoid storing sensitive derived intent.
-- **Teen safety / sensitive accounts:** Ensure restricted accounts and safety states exclude prioritization surfaces by default.
+Stop / roll back if:
+- Reports/blocks increase by **>2% relative** sustained 48h, or
+- Saturation > **20%** on first screen, or
+- Crash-free sessions regress.
 
 ---
 
-## 11) Rollout plan (v2)
-1. **Needs reply (P0) behind feature gate**
-   - Start: employees/dogfood → 1% creators/SMBs → 5% → 25%.
-   - Ship only after guardrails stable (spam/blocks not up, saturation controlled).
-2. **Requests triage assist (P0) parallel gate**
-   - Launch to high-volume DM users first.
-   - Validate time-to-first-action improvements.
-3. **Open loops module**
-   - Add only after Needs reply proves it doesn’t increase anxiety/clutter.
+## 10) Privacy, integrity, and safety
+- **Spam amplification:** conservative eligibility; exclude restricted/low-trust; rely on existing classification.
+- **Anxiety risk:** subtle UI, dismiss/mark handled, strict caps, no new push.
+- **Data minimization:** avoid storing derived “intent”; store only state needed for dismiss persistence.
 
 ---
 
-## 12) Risks & trade-offs
-- **Risk:** Needs reply increases anxiety/guilt.
-  - Mitigation: subtle labeling, dismiss/mark handled, caps, no push notifications in V2.
-- **Risk:** Prioritization surfaces spam.
-  - Mitigation: conservative heuristics; exclude low-trust; use existing classification; guardrails.
-- **Risk:** Extra UI modules add clutter.
-  - Mitigation: strict entry conditions; dismiss; frequency caps.
+## 11) Dependencies & implementation notes (v3)
+- **Client (iOS/Android):** UI pill rendering, module surface, overflow actions.
+- **Server or local state:**
+  - Eligibility can start client-side (heuristics) if needed; preferred: server-provided flags per thread for consistency.
+  - Storage for `mark_handled` per thread (server) or local with sync best-effort.
+- **Requests:** depends on existing request classification + ability to present “Likely spam” bucket.
+- **Feature flags:**
+  - `dm_needs_reply_enabled`
+  - `dm_requests_triage_enabled`
+  - `dm_open_loops_enabled`
 
 ---
 
-## 13) Open questions
-- What’s the best user-facing copy for “Needs reply” that feels helpful, not judgmental?
-- Should Needs reply behave differently for creators (high volume) vs everyday users?
-- Which explicit signals best identify “high-intent” in a policy-safe way (story reply context, verified, mutuals, etc.)?
-- What are the correct exclusion lists: muted, restricted, archived, “sensitive” states?
+## 12) Rollout plan
+1. **Needs reply** (P0) → prove TTFR/CCR lift with stable guardrails.
+2. **Requests triage assist** (P0) → optimize time-to-first-action.
+3. **Open loops** → add only after Needs reply shows low anxiety + low clutter.
+
+---
+
+## 13) Open questions (resolved in v3)
+- **Copy for Needs reply:** Recommend **“Reply”** pill + “To reply” module title; avoid guilt.
+- **Creator vs everyday behavior:** Keep same threshold; adjust cap (creators can see a few more) after saturation monitoring.
+- **Policy-safe signals:** Prefer explicit context (story reply, verified, mutuals) + `?`; avoid semantic intent classification.
+- **Exclusions:** Default exclude muted, archived, restricted, blocked; also exclude threads in safety-sensitive states per policy.
 
 ---
 
 ## 14) Summary
-This PRD targets Instagram DM retention and utility by improving **reply speed and conversation continuation** through lightweight prioritization (*Needs reply*), faster Message Requests triage, and resurfacing of open loops across sessions—without turning DMs into a heavy workflow tool.
+This PRD improves Instagram DM conversation health by making **unreplied, high-likelihood threads** easier to spot and finish (Needs reply), reducing Requests triage friction, and resurfacing open loops after time away—while protecting against spam amplification and anxiety.
