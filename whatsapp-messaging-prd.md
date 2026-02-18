@@ -10,10 +10,15 @@
 
 **Product:** WhatsApp (Messaging)
 **Author:** Mayank Malviya
-**Status:** v1 — problem framing, metrics, and execution-ready proposals
+**Status:** v3 — locked heuristics + instrumentation for Needs reply, intent-based prompts, and group summaries with launch gates
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/whatsapp-messaging-teardown.md
 
 ---
+
+## Version history
+- **v3 (current):** locked heuristics/state machine + instrumentation for all three solutions, plus launch gates + guardrails.
+- **v2:** clarified “Needs reply” spec (eligibility + dismissal), edge cases, and an event schema for safe measurement.
+- **v1:** problem framing, metrics, and initial execution-ready proposals.
 
 ## 1) Problem statement
 WhatsApp’s core retention engine is the **reply loop**: a user sends a message, receives a reply, and the thread continues. When replies are slow or absent, conversations stall, users lose confidence that WhatsApp is the fastest path from intent → outcome, and they shift to other surfaces (calls, other apps) or disengage.
@@ -95,6 +100,18 @@ Key failure modes to address:
 
 **Expected impact:** Higher CCR and lower TTFR for busy users.
 
+#### V3 spec: Eligibility + state machine
+- **Eligibility window:** last inbound message < 12h, thread not muted/archived, user’s last outbound older than latest inbound, and unread count < 50 (avoid stale piles).
+- **Signals considered:** question or question mark near end, direct mention in group, message replied-to you, or inbound voice note flagged `reply_to_you`.
+- **Exclusions:** business accounts with automation, disappearing chats, muted/archived/blocked contacts, and threads already marked handled.
+- **State transitions:** `eligible` → `surfaced` → (`handled` after user replies/marks handled) or `expired` at 24h. `dismissed` state suppresses resurfacing until a new outbound is sent or 48h passes.
+
+#### Instrumentation & controls
+- Events: `needs_reply_impression`, `needs_reply_dismiss`, `needs_reply_mark_handled`, `needs_reply_reengaged` (reply sent within 10m).
+- Persist dismiss/handled flags in a lightweight per-thread store referenced by both mobile + web; wipe on thread delete.
+- Soft cap to 5 concurrent highlights; rotate by recency and drop oldest when new ones arrive.
+- Safety levers: auto-disable if user dismisses >5 in 24h or toggles `Don’t show Needs reply`.
+
 ---
 
 ### Solution 2: Smarter notification timing prompts (permissioning at intent)
@@ -110,6 +127,18 @@ Key failure modes to address:
 
 **Expected impact:** Improved A2 (new users) and reduced missed replies.
 
+#### V3 spec: Triggering & guardrails
+- **Triggers:** (a) user sends first message to a contact after installing; (b) user joins first group; (c) user re-enables notifications after >30d gap.
+- **Frequency caps:** max 2 prompts per user per 7d, never twice in the same session, and suppress when user is already opted in.
+- **Copy variants:** `“Don’t miss replies — turn on notifications?”` (primary) or softer `“Stay updated when <contact> replies”`; localized + A/B tested.
+- **Dismissal logic:** `Not now` snoozes for 30d; `Never ask again` toggles a pref in account settings.
+
+#### Instrumentation & controls
+- Events: `intent_prompt_surface`, `intent_prompt_accept`, `intent_prompt_decline`, `intent_prompt_autosuppress` (cap reached).
+- Log trigger type, thread/group id hash, and prior notification state for each event.
+- Tie acceptance to notification enablement event to ensure we don’t double-count OS dialogs.
+- Guardrail: auto-disable per user if decline rate >80% over 5 prompts or if OS reports “too many prompts” (iOS 17).
+
 ---
 
 ### Solution 3: “Since you were away” micro-summary for high-traffic groups
@@ -121,6 +150,17 @@ Key failure modes to address:
 **Why:** Reduces re-entry cost and makes it easier to respond.
 
 **Constraints:** Avoid content interpretation claims; stick to observable explicit signals.
+
+#### V3 spec: Eligibility & payload
+- **Eligibility:** groups with >30 members or >40 unread messages, and at least one mention/reply-to-you in the last 12h. Exclude muted, archived, and community announcement-only groups.
+- **Payload:** top metrics row (mentions, replies to you, total new messages) + up to two pinned snippets chosen via explicit signals (mentions to you first, then replies to your messages).
+- **Freshness:** summarize last 12h window; if user re-opens within 30m show a lighter “You’re caught up” state.
+- **Dismissal:** swipe away hides summary for that group for 24h; `Never show for this group` stored in per-group settings.
+
+#### Instrumentation & controls
+- Events: `group_summary_surface`, `group_summary_expand`, `group_summary_dismiss`, `group_summary_action` (user replies or taps mention).
+- Capture payload size (counts) + generation latency to ensure <150 ms added to open.
+- Guardrail auto-disable if summary latency >300 ms p95 or if mute/leave rate increases >5% vs control.
 
 ---
 
@@ -159,14 +199,31 @@ Key failure modes to address:
 3. Add Solution 2 as a parallel track (Experiment B) focused on new users.
 4. Ship Solution 3 after validating that it reduces re-entry friction without increasing mute/leave.
 
+## 11) Instrumentation & launch gates (V3)
+
+### Telemetry coverage
+- `needs_reply_*`, `intent_prompt_*`, and `group_summary_*` events land in the same analytics table with `user_id`, `thread_id_hash`, `surface`, and `experiment arm` for easy joins.
+- Daily completeness alert if ingestion <99% of experiment exposure to avoid blind spots.
+- TTFR/CCR computed via existing conversation-start dataset but now annotated with whether a Needs reply cue fired.
+
+### Go / no-go criteria
+- **Phase 0 (dogfood):** require <200 ms added latency per surface and <5% dismiss/complaint rate before expanding.
+- **Phase 1 (1% holdout):** ship if TTFR improves ≥3% and guardrails (mute/leave, notification opt-outs) move <1% vs control.
+- **Phase 2 (10–50% ramp):** continue only if CCR improves ≥2% absolute for exposed conversations and spam/block reports do not increase.
+
+### Operational guardrails
+- Auto-kill switch wired to experimentation framework; flip off if latency, crash, or guardrail metrics breach thresholds.
+- Weekly review: ratio of prompts accepted + subsequent OS notification success vs declines to ensure prompts still valuable.
+- Documented on-call playbook linking states → remediation (e.g., clear handled KV if corruption detected).
+
 ---
 
-## 11) Open questions
+## 12) Open questions
 - What’s the best user-facing language for “Needs reply” without inducing guilt?
 - How should the system behave for muted chats/groups?
 - Should “mark handled” be per-chat only, or a global “clear all” action?
 
 ---
 
-## 12) Summary
+## 13) Summary
 This PRD targets WhatsApp’s core retention engine by improving **reply speed and conversation continuation** with lightweight prioritization cues, intent-based notification permissioning, and re-entry assistance for noisy groups—without changing WhatsApp into a feed.
