@@ -2,8 +2,8 @@
 
 **Product:** CRED Pay (UPI)  
 **Author:** Mayank Malviya  
-**Date:** 18 Feb 2026  
-**Status:** v2 — UX flows + instrumentation + experiments (offline scan & pay)
+**Date:** 19 Feb 2026  
+**Status:** v3 — API contracts + acceptance tests + launch gates + dependencies + runbooks
 
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/cred-pay-upi-teardown.md
 
@@ -11,8 +11,8 @@
 
 ## Version history
 - **v1 (2026-02-18):** Problem framing for offline scan & pay trust gaps, goals/guardrails, solution pillars, high-level requirements, metrics, rollout, open questions.
-- **v2 (this doc):** Adds implementation-directed **UX flows**, **state/edge-case rules**, a **measurement spec** (event names + properties + validation), and **experiment designs** per pillar.
-- **v3 (planned):** Finalize API contracts + acceptance tests, launch gates with precise thresholds, dependency tracker + operational runbooks.
+- **v2 (2026-02-18):** Adds implementation-directed **UX flows**, **state/edge-case rules**, a **measurement spec** (event names + properties + validation), and **experiment designs** per pillar.
+- **v3 (this doc, 2026-02-19):** Finalizes **API contracts**, **acceptance tests**, **launch gates** with thresholds, a **dependency tracker**, and **operational runbooks**.
 
 ---
 
@@ -65,13 +65,13 @@ Bundle of UX + system improvements aimed at **making state explicit** and **prev
 4. **Merchant identity cues** — Preview card on scan + persistence through outcome states.
 5. **Support hooks** — Contextual support entry that auto-attaches structured diagnostic payload.
 
-**In-scope (v2):** Offline scan & pay (static + dynamic QR), including pending/unknown resolution UX.
+**In-scope:** Offline scan & pay (static + dynamic QR), including pending/unknown resolution UX.
 
 **Out-of-scope (for now):** Online intent/deeplink flows, collect requests, rewards changes, risk rules.
 
 ---
 
-## 5. Product principles (v2)
+## 5. Product principles
 1. **Success must be boring and definitive.** Never trade certainty for delight.
 2. **Pending is a first-class state** with guidance; users must not be pushed into blind retries.
 3. **Merchant identity must be legible** before PIN (when possible) and after confirmation.
@@ -116,7 +116,7 @@ Trigger: no final confirmation within threshold.
    - Pending → **Success** OR Pending → **Failed** OR Pending → **Reversed**.
 
 **Pending SLA copy:**
-- Show a resolution expectation (e.g., “Usually resolves in ~2 minutes; can take up to 10 minutes.”) — final numbers to be set with PSP + historical data.
+- Show a resolution expectation (e.g., “Usually resolves in ~2 minutes; can take up to 10 minutes.”) — set using PSP + historical data.
 
 ### 6.3 Merchant identity uncertainty (new merchant)
 If merchant metadata is weak:
@@ -181,7 +181,7 @@ Copy rules:
 ---
 
 ## 8. Receipt spec (fields + behaviors)
-### 8.1 Required fields (v2)
+### 8.1 Required fields
 Receipt is considered **complete** only if it includes:
 - Merchant display name (or fallback VPA)
 - Amount
@@ -252,7 +252,7 @@ All events must include:
 
 ### 9.6 Analytics validation checklist (must-have)
 - **Joinability:** 99%+ of events must carry `attempt_id`.
-- **Receipt completeness:** `receipt_viewed.receipt_complete` must be computed on-device and also validated server-side for a sample.
+- **Receipt completeness:** `receipt_viewed.receipt_complete` computed on-device and also validated server-side for a sample.
 - **State monotonicity:** detect any state regressions client-side; emit `state_regression_detected` if found.
 
 ---
@@ -284,7 +284,7 @@ All events must include:
   - Duplicate attempts per 1k attempts (same merchant+amount within window)
   - Support contacts tagged “duplicate debit”
 - **Guardrails:**
-  - User drop-offs from Pending (avoid trapping users): % users who exit app from Pending (no worse than +1pp)
+  - % users who exit app from Pending (no worse than +1pp)
 - **Go/no-go:** adopt if duplicate attempts drop ≥20%.
 
 ### 10.4 Experiment C — Receipt-first success surface
@@ -295,7 +295,7 @@ All events must include:
   - Receipt share/copy rate
   - Support contacts tagged “merchant dispute / didn’t receive”
 - **Secondary:** 7-day repeat scan rate.
-- **Guardrail:** time-to-dismiss success screen (avoid slowing flow): +≤300ms median.
+- **Guardrail:** median time-to-dismiss success screen (avoid slowing flow): +≤300ms.
 
 ### 10.5 Experiment D — Merchant identity cues on scan preview
 **Hypothesis:** Identity cues reduce wrong-merchant anxiety and improve completion.
@@ -308,7 +308,7 @@ All events must include:
 
 ---
 
-## 11. Rollout plan (v2)
+## 11. Rollout plan
 1. **Dogfood (week 1):** feature flag for staff; validate state monotonicity + receipt completeness.
 2. **City pilot (week 2–3):** 10% Bangalore offline payments; run Experiments A/B concurrently if interference minimal.
 3. **Step-up (week 4):** expand to top 5 offline cities if:
@@ -321,7 +321,293 @@ Dependencies: state machine service changes, receipt caching, instrumentation up
 
 ---
 
-## 12. Open questions (remaining for v3)
+## 12. API contracts (v3)
+> Purpose: make the implementation unambiguous across client, payments backend, and support tooling.
+
+### 12.1 Entities
+**PaymentAttempt** (server canonical)
+- `attempt_id` (uuid)
+- `user_id` (hash)
+- `mode` = `offline_scan`
+- `qr_type` = `static|dynamic|unknown`
+- `merchant`:
+  - `merchant_id` (optional)
+  - `display_name` (optional)
+  - `vpa` (string)
+  - `identity_confidence` = `high|med|low`
+- `amount_paise`
+- `currency` = `INR`
+- `funding_source`:
+  - `bank_id`
+  - `masked_account`
+- `state` = `created|auth_started|processing|pending|success|failed|reversed`
+- `failure_taxonomy` (optional; only in terminal or when known)
+- `utr` (optional; required for `success`, may be present in some `pending`)
+- `created_at_ms`
+- `updated_at_ms`
+
+### 12.2 Create attempt
+**POST** `/v1/payments/upi/attempts`
+
+Request
+```json
+{
+  "mode": "offline_scan",
+  "qr_payload": "<raw-qr-string>",
+  "qr_type": "static",
+  "amount_paise": 12500,
+  "merchant_hint": {
+    "merchant_id": null,
+    "vpa": "merchant@upi",
+    "display_name": null
+  },
+  "funding_source": { "bank_id": "hdfc_001" },
+  "client_context": {
+    "network_type": "4g",
+    "device_tier": "med",
+    "app_version": "x.y.z"
+  }
+}
+```
+
+Response (201)
+```json
+{
+  "attempt_id": "uuid",
+  "state": "created",
+  "merchant": {
+    "merchant_id": null,
+    "display_name": "ABC Stores",
+    "vpa": "merchant@upi",
+    "identity_confidence": "med"
+  },
+  "amount_paise": 12500,
+  "currency": "INR"
+}
+```
+
+### 12.3 Fetch attempt (status / details)
+**GET** `/v1/payments/upi/attempts/{attempt_id}`
+
+Response (200)
+```json
+{
+  "attempt_id": "uuid",
+  "state": "pending",
+  "failure_taxonomy": null,
+  "utr": null,
+  "merchant": { "display_name": "ABC Stores", "vpa": "merchant@upi", "identity_confidence": "med" },
+  "amount_paise": 12500,
+  "funding_source": { "bank_id": "hdfc_001", "masked_account": "xx1234" },
+  "timestamps": { "created_at_ms": 0, "updated_at_ms": 0 }
+}
+```
+
+**Contract rules**
+- `state` is monotonic by server contract (no regressions).
+- `utr` must be non-null for `success`.
+- `failure_taxonomy` must be non-null for `failed` (use `unknown` if no better mapping).
+
+### 12.4 Subscribe to pending updates (push)
+**POST** `/v1/payments/upi/attempts/{attempt_id}/subscriptions`
+
+Request
+```json
+{ "channel": "push", "quiet_hours_respect": true }
+```
+
+Response (200)
+```json
+{ "subscribed": true }
+```
+
+Notes
+- Server triggers push when attempt enters `success|failed|reversed`.
+- Rate limit: max 1 subscription per `attempt_id` per device.
+
+### 12.5 Retry guardrail evaluation
+**POST** `/v1/payments/upi/retry/eligibility`
+
+Request
+```json
+{
+  "user_id": "hash",
+  "merchant_key": { "merchant_id": null, "vpa_hash": "..." },
+  "amount_paise": 12500,
+  "last_attempt_id": "uuid",
+  "last_state": "pending",
+  "last_attempt_age_ms": 120000
+}
+```
+
+Response (200)
+```json
+{
+  "should_guardrail": true,
+  "window_ms": 300000,
+  "reasons": ["pending_within_window"],
+  "allowed_actions": ["wait_notify", "retry_different_account", "continue_anyway"],
+  "block": false
+}
+```
+
+### 12.6 Support payload handoff
+**POST** `/v1/support/tickets`
+
+Request (excerpt)
+```json
+{
+  "category": "offline_pending",
+  "attempt_id": "uuid",
+  "auto_payload": {
+    "state": "pending",
+    "merchant": { "display_name": "ABC Stores", "vpa": "merchant@upi" },
+    "amount_paise": 12500,
+    "funding_source": { "bank_id": "hdfc_001" },
+    "network_type": "4g",
+    "client_events_sample": ["pay_pending_shown", "pay_status_checked"]
+  }
+}
+```
+
+---
+
+## 13. Acceptance tests (v3)
+> “Done” means these pass in staging + dogfood builds.
+
+### 13.1 State monotonicity
+1. **Processing→Pending→Success monotonicity**
+   - Given an attempt with delayed confirmation
+   - When the client polls / receives update
+   - Then UI must never show Success before server state becomes `success`
+   - And must never return from `pending` to `processing`
+
+2. **Idempotent updates (no flicker)**
+   - Given repeated identical `GET attempt` responses
+   - Then UI should not re-render state banner repeatedly (no toast spam)
+
+### 13.2 Pending UX rules
+3. **No retry button in `processing`**
+4. **Pending CTAs appear**: Check status, Wait & notify, Retry (guardrailed)
+5. **Pending offline copy** when `network_type=none` post-auth
+
+### 13.3 Retry guardrail
+6. **Guardrail triggers in-window** (same merchant + amount_bucket + pending + ≤5m)
+7. **Guardrail does not trigger** when:
+   - amount differs bucket OR
+   - merchant differs OR
+   - last state is terminal OR
+   - age > 5m
+8. **Continue anyway requires long-press** (accessibility: also allow “press & hold” with haptics; ensure screen reader hint)
+
+### 13.4 Receipt completeness and actions
+9. **Receipt_complete true** for success attempts with all 5 fields
+10. **Share card includes**: merchant, amount, funding source, timestamp, UTR
+11. **Copy UTR** copies only the UTR string (no extra whitespace)
+12. **Receipt caching**
+   - Given success then network drop
+   - When user opens History
+   - Then receipt still renders from cache and later reconciles with server
+
+### 13.5 Instrumentation
+13. **attempt_id present** on 99%+ of client events (verified by automated test that asserts event payloads)
+14. **pay_state_changed emits** on every state transition with correct `from_state/to_state`
+15. **state_regression_detected** is emitted if server returns a regressive state (this should be 0 in practice; used for detection)
+
+### 13.6 Support flow
+16. **Support ticket attaches payload** and includes `attempt_id`
+17. **Merchant dispute path** shows receipt first, then support
+
+---
+
+## 14. Launch gates (v3)
+### 14.1 Gating metrics & thresholds (must all be green)
+Pilot scope: city pilot (10%), offline-heavy cohort primary.
+
+| Category | Metric | Threshold | Window |
+| --- | --- | --- | --- |
+| Reliability | `pay_result.success_rate` | ≥ baseline - 0.2pp | rolling 24h |
+| Latency | p95 time-to-terminal (fast rails cohort*) | ≤ baseline + 250ms | rolling 24h |
+| Trust | Panic retry rate | ≥ 15% reduction | 7 days |
+| Support | Support contacts per 1k (pending/duplicate categories) | ≥ 10% reduction | 7 days |
+| Integrity | Duplicate attempts per 1k (same merchant+amount within 5m) | ≥ 20% reduction | 7 days |
+| Data | Joinability (`attempt_id` coverage) | ≥ 99% | daily |
+| UX | Receipt completeness exposure | ≥ 80% of success | daily |
+
+\*Fast rails cohort definition (for gating): `time_to_terminal_ms <= 1500` in control; compare only that slice to avoid punishing rails downtime.
+
+### 14.2 Kill switches
+- Flag 1: **Pending UX** (revert to existing)
+- Flag 2: **Retry guardrail** (disable modal; fallback to guided retry)
+- Flag 3: **Receipt-first success** (disable auto-open receipt)
+- Flag 4: **Push subscription** (disable notify)
+
+### 14.3 Escalation triggers (page-oncall)
+- Success rate drops >0.5pp vs baseline for 30 minutes
+- `state_regression_detected` > 0.05% of attempts
+- Duplicate attempts per 1k increases >10% vs baseline
+
+---
+
+## 15. Dependency tracker (v3)
+| Workstream | Owner | Depends on | Deliverable | Target | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Client state machine + UI | Mobile | Payments API `GET attempt` monotonicity | Processing/Pending/Receipt screens | W1 | Ensure idempotent rendering |
+| Payments attempt service | Backend | PSP mapping + status source of truth | `/attempts` create + get | W1 | Must guarantee monotonic state |
+| Push notify templates | Backend/Platform | subscription endpoint | pending resolution pushes | W2 | Quiet hours compliance |
+| Retry eligibility | Backend | merchant key normalization | `/retry/eligibility` | W1 | Prefer server decision even if client can pre-check |
+| Receipt caching | Mobile | storage encryption policy | local receipt cache | W2 | Clarify UTR storage constraints |
+| Instrumentation + dashboards | Data | event schema final | dashboards + alerts | W2 | Gatekeeping metrics |
+| Support ingestion | Support Eng | ticket API | auto-payload tickets | W2 | Verify PII policy |
+
+---
+
+## 16. Operational runbooks (v3)
+### 16.1 Monitoring
+Dashboards (must exist before pilot):
+- Attempt funnel: scan→auth→processing→pending→terminal
+- State distribution over time (spikes in `pending`)
+- Time-to-terminal percentiles
+- Panic retry + duplicate attempts
+- Receipt completeness + share/copy rates
+- Support tickets by category (offline_pending, duplicate_debit, merchant_dispute)
+
+### 16.2 Incident: PSP/bank outage (pending spike)
+**Symptoms:** pending rate spikes, time-to-terminal inflates, support tickets rise.
+
+**Actions:**
+1. Enable kill switch: disable Retry (or enforce stronger guardrail: block continue-anyway) if duplicates rising.
+2. Update Pending copy to outage variant (server-driven copy if available) that strongly discourages retry.
+3. Increase status poll interval to reduce backend load (e.g., exponential backoff capped at 30s).
+4. Notify support team with incident tag; auto-attach PSP status page if available.
+
+### 16.3 Incident: Duplicate debits rise
+**Symptoms:** duplicate attempts per 1k increases; support “double debit” tickets spike.
+
+**Actions:**
+1. Turn on strict duplicate block for in-window retries (server `block=true`).
+2. Ensure “Wait & get notified” CTA is primary and sticky.
+3. Audit guardrail eligibility logs for merchant_key / amount_bucket mismatches.
+
+### 16.4 Incident: Receipt missing UTR
+**Symptoms:** receipt_complete drops; UTR null on success.
+
+**Actions:**
+1. Treat as **SEV** if >0.5% success attempts missing UTR.
+2. Roll back receipt-first success if it exposes incomplete receipts; show “Receipt updating…” but keep share disabled.
+3. Backend: verify PSP response mapping; ensure UTR is captured before marking `success`.
+
+### 16.5 Rollback plan
+- Roll back in this order (least to most disruptive):
+  1) Disable receipt auto-open
+  2) Disable push subscription
+  3) Disable pending UX (revert to old)
+  4) Disable guardrail
+- Keep instrumentation on (do not roll back analytics unless it breaks core flows).
+
+---
+
+## 17. Open questions (carry-forward)
 1. Pending SLA copy: 5 vs 10 minutes — choose based on historical settlement.
 2. Merchant verification: what’s the “verified” source of truth across PSPs?
 3. Should reward feedback appear inside receipt or remain separate?
