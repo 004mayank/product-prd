@@ -1,26 +1,27 @@
-# PRD v2: Flight Metasearch (Competitor) — Search → Booking Handoff
+# PRD v3: Flight Metasearch (Competitor) — Search → Booking Handoff
 
-**Product:** Flight metasearch marketplace (Skyscanner competitor)
-**Author:** Mayank Malviya
-**Last updated:** 22 Feb 2026
-**Status:** v2 — clarified scope, requirements, instrumentation, and rollout; added explicit trust/mismatch program
+**Product:** Flight metasearch marketplace (Skyscanner competitor)  
+**Author:** Mayank Malviya  
+**Last updated:** 23 Feb 2026  
+**Status:** v3 — locked MVP, added concrete SLOs, clarified data contracts + governance thresholds, and specified Trust Pack scoring + UX states
 
 > This PRD defines a competitor to Skyscanner focused on the Flights funnel from **search → results → itinerary detail → partner selection → booking handoff**, differentiated by a first-class **Trust Pack** (price confidence, rules clarity, partner reliability).
 
 ---
 
-## v2 changelog (vs v1)
-- Added **launch scope** (markets/routes), explicit **MVP constraints**, and **non-goals** refinements.
-- Expanded functional requirements for **SRP clustering**, **Offer freshness**, and **redirect handoff**.
-- Added a concrete **Mismatch Program** (detection, user reporting, partner penalties, and UI).
-- Strengthened **data/instrumentation** (event schema, identifiers, attribution, bounce-back logic).
-- Added **privacy/compliance** and **accessibility** requirements.
-- Added **experimentation** plan and **go/no-go** gates for rollout.
+## v3 changelog (vs v2)
+- Locked **MVP scope** to one launch market + route set; clarified what is explicitly out of scope for v3.
+- Added concrete **performance SLOs** (TTFR, filter latency, redirect success), plus reliability/error budgets.
+- Specified **data contracts** and identifier strategy (itinerary_signature, offer_id, click_id), including bounce-back attribution.
+- Upgraded **Trust Pack** into a scored model with thresholds, calibration plan, and UX fallback states.
+- Made **Partner governance** actionable with volume thresholds, penalty ladder, and partner-facing reporting.
+- Added detailed **edge cases** (sold out, repricing, currency/locale drift) and SRP/detail UX behavior.
+- Strengthened **experiment design** (A/B cells, ramp criteria) and post-launch ops (dashboards, alerts).
 
 ---
 
 ## 0) TL;DR
-Build a flight comparison product that wins on **trust + clarity** (price confidence, rules clarity, partner reliability) while maintaining fast search and a high click-out rate.
+Build a flight comparison product that wins on **trust + clarity** while keeping search fast and click-out high.
 
 Core surfaces:
 1) Search form
@@ -28,7 +29,7 @@ Core surfaces:
 3) Itinerary detail page with **Partner List** + **Trust Pack**
 4) Redirect handoff with robust tracking and mismatch instrumentation
 
-**Primary differentiator:** We make *price/rules/partner risk legible before click-out*.
+**Primary differentiator:** Make *price/rules/partner risk legible before click-out*—and create enforcement loops when partners misbehave.
 
 ---
 
@@ -38,7 +39,7 @@ Users of flight metasearch hit recurring failures:
 - **Rules ambiguity** (baggage, change/refund) that blocks conversion.
 - **Low partner trust**, especially for unfamiliar OTAs.
 
-A competitor can differentiate by making the trust stack clear *before* click-out without turning the product into a policy document.
+A competitor can differentiate by making trust signals clear *before* click-out without turning the product into a policy document.
 
 ---
 
@@ -52,58 +53,65 @@ A competitor can differentiate by making the trust stack clear *before* click-ou
 ---
 
 ## 3) Goals / Non-goals
-### Goals (v2)
+### Goals (v3)
 1) End-to-end funnel: **Search → SRP → Detail → Partner click-out**.
 2) Trust differentiation:
    - price confidence + freshness
    - rules clarity (baggage/change/refund)
-   - partner reliability and transparent labels
+   - partner reliability + transparent labels
 3) Marketplace foundations:
-   - partner governance signals
+   - partner governance signals + penalty ladder
    - mismatch/complaint feedback loops
 4) Operational excellence:
-   - predictable latency (TTFR)
+   - predictable latency + high availability
    - observable funnel with debugging tools
 
-### Non-goals (for this PRD version)
+### Non-goals (explicit for v3)
 - Owning checkout/payment (metasearch only)
 - Hotels/cars
 - Bundles, loyalty, subscriptions
 - Full itinerary management (“Trips”)
-- Guaranteed “final price” (we provide confidence + recency + accountability signals)
+- Multi-city search
+- Price freeze / guarantee / “final price” (we provide confidence + recency + accountability signals)
 
 ---
 
-## 4) Launch scope (explicit)
-### Initial geography / routes (MVP)
-Pick **one primary market** and a **narrow route set** (e.g., top 50 routes by demand) to maximize data density for mismatch + trust scoring.
-
-**Decision required:** choose one of:
-- India domestic + nearby international
+## 4) Launch scope (locked for v3)
+### Market + routes
+**MVP pick (required):** choose exactly one market for v3:
+- **India domestic + nearby international (recommended)**
 - UK + EU short-haul
-- US domestic (harder; more partners/complexity)
+- US domestic (higher complexity)
 
-### Device/platform
-- Web first (mobile web + desktop)
-- App later (out of scope for MVP unless explicitly required)
+**Route set:** top **50–150 routes** by demand (keep narrow to build trust metrics fast).
+
+### Platform
+- Web first: mobile web + desktop
+- App out of scope for v3
+
+### Partners (MVP)
+- Airline direct links (where available)
+- **1–2 OTAs** max at launch
+- Requirement: partner must support stable deep links + attribution params; otherwise they ship in later ramp.
 
 ---
 
 ## 5) Success metrics
 ### North Star
 **Trusted qualified click-outs per search session**
-> A click-out that does not quickly bounce back and has low mismatch probability (or results in low mismatch reporting).
+> A click-out that does not quickly bounce back and has low mismatch probability (or low mismatch reporting).
 
 ### Core funnel
 - Search → SRP rate
 - SRP → Itinerary detail open rate
 - Detail → Partner click-out rate
-- **Bounce-back rate**: return within 30–120s of click-out
-- **Mismatch proxy rate**: partner landing price ≠ shown price (via report + automated checks where feasible)
+- **Bounce-back rate:** return within 30–120s of click-out
+- **Mismatch proxy rate:** partner landing price ≠ shown price (user report + automated checks where feasible)
 - Repeat searches (7/30-day)
 
 ### Guardrails
-- SRP TTFR p95
+- SRP **TTFR p95**
+- Redirect success rate
 - Complaint rate per 1k click-outs
 - Partner diversity (avoid over-penalization without evidence)
 
@@ -129,6 +137,10 @@ We do not attempt to beat Skyscanner on partner coverage initially.
 - Optional: nearby airports toggle
 - Currency + locale derived from geo/selection (override allowed)
 
+**Edge cases**
+- Invalid/unsupported routes: show “No results for this route yet” + suggestions.
+- Cabin/traveler limits enforced at UI + API.
+
 **Acceptance criteria**
 - Users can submit a search in < 30s from landing.
 - Autocomplete disambiguates city vs airport codes.
@@ -142,18 +154,23 @@ We do not attempt to beat Skyscanner on partner coverage initially.
 - Anchors: **Best / Cheapest / Fastest**
 - Filters: stops, times, duration, airlines, airports
 
-**v2 SRP requirements**
+**v3 SRP requirements**
 - Default sort = **Best** (multi-objective)
 - Inline “Direct only” toggle
 - Price + duration always visible
 - **Clustering:** group offers by *identical itinerary* (same legs/flight numbers/airports/times), with multiple sellers inside
-  - SRP may show best offer per cluster + “X sellers” affordance
-- Show **offer freshness**: “Updated X min ago” on cluster or selected offer
+  - SRP shows best offer per cluster + “X sellers” affordance
+- Show **offer freshness**: “Updated X min ago”
 - Show **price confidence** badge (High/Med/Low) at least on top offers
+- “Sold out” / “Price changed” states per seller inside a cluster (do not remove silently)
 
-**Performance requirements (targets)**
-- TTFR p95: set target based on stack; track continuously
+**Error/empty states**
+- If aggregation fails partially: show partial results with banner “Some partners unavailable—showing available results.”
+- If no results: show filters reset + alternative dates (if available) + nearby airports suggestion.
+
+**Performance & perceived latency**
 - Progressive results: show partial results while completing aggregation
+- Cancellable filter updates (avoid blocking UI)
 
 **Acceptance criteria**
 - SRP renders with skeleton states.
@@ -178,8 +195,12 @@ We do not attempt to beat Skyscanner on partner coverage initially.
   - Trust Pack condensed chips (price confidence, rules clarity, partner reliability)
   - known caveats (e.g., “Baggage details incomplete”)
 
+**UX behavior**
+- If rules are Unknown: show compact explainer + “Details at partner” disclaimer (do not pretend certainty).
+- If price confidence is Low: show “Prices may change at checkout” + “Why?” modal with factors.
+
 **Acceptance criteria**
-- At least 2 partner options for top itineraries in launch markets.
+- At least 2 partner options for top itineraries in launch markets (where supply exists).
 - Partner row shows: partner name, price, trust label, caveats.
 
 ---
@@ -192,34 +213,69 @@ We do not attempt to beat Skyscanner on partner coverage initially.
 - Maintain consistent **offer_id** (or derived signature) through click-out
 
 **Redirect UX requirements**
-- Interstitial (optional) for transparency:
+- Interstitial behavior for v3:
+  - **ON by default** for “New” or “Caution” partners
+  - Optional for “Trusted” partners (experiment)
+- Interstitial shows:
   - “Redirecting to {partner}”
-  - price shown + timestamp
+  - price shown + “Updated X min ago”
   - lightweight disclaimer + “Report a price issue” link
 
+**Failure modes**
+- If partner deep link fails: show error page with retry + alternative sellers.
+- If currency/locale mismatch risk detected: show warning (“Partner may display a different currency”).
+
 **Acceptance criteria**
-- Click-out logs include: search_id, itinerary_id, offer_id, partner_id, price_shown, timestamp, device, locale/currency.
+- Click-out logs include: search_id, itinerary_id, offer_id, partner_id, price_shown, fetched_at, timestamp, device, locale/currency.
 
 ---
 
-## 8) The Trust Pack (v2 spec)
-### Components
+## 8) The Trust Pack (v3 spec)
+### Components (user-facing)
 1) **Price confidence** (High / Medium / Low)
-   - Inputs (v2):
-     - partner historical mismatch rate (route-level + global)
-     - offer freshness age
-     - route volatility bucket
-     - % of offers that require re-price at partner
 2) **Rules clarity** (Clear / Partial / Unknown)
-   - Inputs:
-     - baggage/change/refund completeness
-     - normalization success and vendor reliability
 3) **Partner reliability** (Trusted / New / Caution)
-   - Inputs:
-     - complaint/report rate
-     - bounce-back rate
-     - mismatch rate
-     - customer support signals if available
+
+### Underlying scoring (v3)
+All three chips are derived from a **0–100 score** each, then bucketed.
+
+#### 8.1 Price Confidence score (0–100)
+**Inputs** (minimum viable)
+- Partner mismatch rate (route-level preferred, fallback global)
+- Offer age (minutes since fetched_at)
+- Route volatility bucket (learned from historical reprice frequency)
+- “Requires reprice” flag frequency (partner capability)
+
+**Bucketing**
+- High: ≥ 80
+- Medium: 50–79
+- Low: < 50
+
+#### 8.2 Rules Clarity score (0–100)
+**Inputs**
+- Completeness of: baggage, changes, refunds fields
+- Normalization success rate by partner
+
+**Bucketing**
+- Clear: ≥ 80
+- Partial: 40–79
+- Unknown: < 40
+
+#### 8.3 Partner Reliability score (0–100)
+**Inputs**
+- Complaint/report rate per 1k click-outs
+- Bounce-back rate (30–120s)
+- Mismatch proxy rate
+- Deep-link failure rate
+
+**Bucketing**
+- Trusted: ≥ 80
+- New: insufficient volume (see governance thresholds)
+- Caution: < 80 once volume threshold met
+
+### Calibration plan (must-have for v3)
+- Start with heuristic weights; re-fit monthly using observed mismatch + bounce-back outcomes.
+- Keep a “reason codes” log for each score (top 2 factors) to power “Why?” UI and internal debugging.
 
 ### UI placement
 - Always visible on itinerary detail.
@@ -235,7 +291,7 @@ We do not attempt to beat Skyscanner on partner coverage initially.
 ### Objective
 Maximize user satisfaction and trusted click-outs, not just cheapest price.
 
-### v2 approach
+### v3 approach
 - Start with a **scoring function** (configurable weights):
   - price percentile
   - duration penalty
@@ -248,6 +304,9 @@ Maximize user satisfaction and trusted click-outs, not just cheapest price.
 - Fastest = min duration itinerary
 - Best = max composite score (per cluster)
 
+### Guardrails
+- Never hide the cheapest offer for a cluster; trust affects ranking and badges, not availability.
+
 ---
 
 ## 10) Offer freshness & caching
@@ -255,52 +314,66 @@ Maximize user satisfaction and trusted click-outs, not just cheapest price.
 
 **Requirements**
 - Store **fetched_at** per offer.
-- Display “Updated X min ago” when age exceeds threshold (configurable).
-- If offer is older than threshold, show “Refresh prices” affordance (optional in MVP).
+- Display “Updated X min ago” when age exceeds threshold.
+- Thresholds (v3 defaults, configurable):
+  - High freshness: ≤ 10 min
+  - Medium: 11–30 min
+  - Stale: > 30 min
+- If stale: show “Prices may have changed” warning (and consider “Refresh prices” as v4 candidate).
 
 **Acceptance criteria**
 - Offers older than threshold are labeled; click-outs still tracked.
 
 ---
 
-## 11) Partner marketplace
+## 11) Partner marketplace & governance (v3)
 ### Launch strategy
-- Start with small set of high-quality partners (airline direct + 1–2 OTAs).
-- Prefer partners with stable deep links and predictable pricing.
+- Start with small set of high-quality partners.
 
-### Governance hooks
-Maintain per-partner and per-route:
-- mismatch rate
+### Governance metrics (tracked per partner + per route)
+- mismatch proxy rate
 - bounce-back rate
 - report/complaint rate
+- deep-link failure rate
 
-Penalty policy (v2)
-- Apply ranking penalties only after minimum volume thresholds.
-- Show “New partner” state until thresholds met.
+### Volume thresholds
+- **New partner** state until ≥ **500 click-outs** (or 30 days, whichever comes first).
+- Only apply strong penalties after meeting threshold.
+
+### Penalty ladder
+1) Add warning label on partner row (“Price issues reported”)
+2) Ranking penalty (reduce exposure)
+3) Route-level removal
+4) Market-level removal
+
+### Partner transparency (internal ops requirement)
+- Weekly partner report (email/dashboard) showing:
+  - mismatch rate trend
+  - top routes impacted
+  - deep-link errors
+  - recommended fixes
 
 ---
 
-## 12) Mismatch Program (v2)
+## 12) Mismatch Program (v3)
 ### Detection
 - **User report**: “Price changed” report flow post-click-out and/or on return
 - **Bounce-back proxy**: returned_from_partner within 30–120s
-- **Automated sampling** (where feasible): periodic headless checks on a subset of offers (optional; depends on partner constraints)
+- **Automated sampling** (optional): headless checks on subset of offers where allowed
 
 ### User experience
-- Provide a simple report UI:
-  - “Price was higher / lower / flight not available / rules different”
-  - optional screenshot upload (out of scope unless needed)
+- Report UI (v3 must-have):
+  - “Price was higher / lower / flight not available / rules different / other”
+  - optional free text
+  - optional screenshot upload (out of scope for v3)
 
 ### Enforcement
-- Dashboard + alerts for partner mismatch spikes.
-- Graduated penalties:
-  1) label warnings
-  2) ranking penalty
-  3) remove partner from route/market
+- Dashboard + alerts for spikes.
+- Auto-create incident when mismatch spikes > threshold on high-volume routes.
 
 ---
 
-## 13) Data & instrumentation
+## 13) Data & instrumentation (v3)
 ### Entities
 - Search
 - Itinerary (normalized)
@@ -309,25 +382,31 @@ Penalty policy (v2)
 - Return event (bounce-back)
 - Feedback / mismatch report
 
+### Identifiers (contract)
+- **search_id**: UUID per submitted search
+- **itinerary_signature**: stable hash of normalized legs (flight numbers + airports + times)
+- **offer_id**: hash(search_id, itinerary_signature, partner_id, price, fetched_at) or partner offer token where available
+- **click_id**: UUID generated at click-out time (primary key for redirect + return attribution)
+
 ### Event schema (minimum viable)
 - search_submitted {search_id, query, locale, currency}
 - srp_viewed {search_id}
 - filter_changed {search_id, filters}
-- itinerary_opened {search_id, itinerary_id}
-- partner_clicked_out {search_id, itinerary_id, offer_id, partner_id, price_shown, fetched_at, ts}
-- returned_from_partner {search_id, offer_id, ts, time_away_sec}
-- mismatch_reported {search_id, offer_id, type, delta?, free_text?}
+- itinerary_opened {search_id, itinerary_signature}
+- partner_clicked_out {search_id, itinerary_signature, offer_id, click_id, partner_id, price_shown, fetched_at, ts}
+- returned_from_partner {search_id, click_id, ts, time_away_sec}
+- mismatch_reported {search_id, click_id, type, delta?, free_text?}
 
-### Identifiers & attribution
-- Use globally unique **search_id** and **offer_id**.
-- Carry offer_id + click_id to partner as params where allowed.
+### Attribution requirements
+- Carry click_id to partner as params where allowed.
+- If partner strips params: use fallback (referrer + time-window) but mark attribution_quality=low.
 
 ---
 
 ## 14) Privacy, compliance, and accessibility
 ### Privacy
 - Minimize PII: do not log passenger names, emails, or payment data.
-- If IP/device identifiers are stored, document retention and purpose.
+- Document retention for IP/device identifiers.
 - Provide user-facing disclosure for redirects and tracking.
 
 ### Accessibility
@@ -337,23 +416,46 @@ Penalty policy (v2)
 
 ---
 
-## 15) Rollout plan + go/no-go gates
+## 15) Performance & reliability SLOs (v3)
+### User-facing performance
+- SRP TTFR p95:
+  - **Mobile web:** ≤ 2.5s
+  - **Desktop:** ≤ 1.8s
+- Filter interaction p95 (time to visibly updated results): **≤ 1.5s**
+- Detail page load p95: **≤ 2.0s**
+
+### Redirect reliability
+- Partner click-out redirect success rate: **≥ 99.5%** (no hard errors)
+- Deep-link validation coverage: **100%** for launch partners/routes
+
+### Observability (must-have)
+- Dashboards: funnel, latency, partner errors, mismatch spikes
+- Alerts: deep-link failures, mismatch spikes, TTFR regression
+
+---
+
+## 16) Rollout plan + experiments + go/no-go
 ### Rollout
 1) Private alpha (internal + friends) on limited routes
-2) Beta in a single geo/market
-3) Expand routes
+2) Beta in a single market (v3 launch market)
+3) Expand routes within market
 4) Expand partners once trust metrics stabilize
 
-### Go/no-go gates (examples)
+### Experiments (v3)
+- Interstitial ON vs OFF for Trusted partners (keep ON for New/Caution)
+- Best ranking weights: trust-heavy vs price-heavy
+- Trust Pack display density: chips-only vs chips + “Why?” affordance
+
+### Go/no-go gates (v3)
 - Mismatch proxy rate below threshold for 2 consecutive weeks
 - Bounce-back rate stable/improving
-- TTFR p95 within target
+- TTFR p95 within SLO
 - No critical partner deep-link failures
 
 ---
 
-## 16) Open questions
-1) Which launch market (geo/routes) do we target first?
+## 17) Open questions
+1) Which launch market (geo/routes) do we target for v3?
 2) Which partners are available and what deep-link/attribution constraints exist?
 3) Minimum viable rules normalization: which baggage/refund fields must be present for “Clear”?
 4) Do we optimize primarily for cheapest or for “trusted best” as the default?
