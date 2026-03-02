@@ -1,29 +1,29 @@
+<p align="center">
+  <img 
+    src="https://raw.githubusercontent.com/004mayank/product-teardowns/main/images/Cred.png" 
+    alt="Cred" 
+    width="200"
+  />
+</p>
+
 # PRD: Offline Trust Pack for CRED Pay (UPI)
 
 **Product:** CRED Pay (UPI)  
 **Author:** Mayank Malviya  
 **Date:** 19 Feb 2026  
-**Status:** v3 — API contracts + acceptance tests + launch gates + dependencies + runbooks
+**Status:** Final - API contracts + acceptance tests + launch gates + dependencies + runbooks
 
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/cred-pay-upi-teardown.md
-
----
-
-## Version history
-- **v1 (2026-02-18):** Problem framing for offline scan & pay trust gaps, goals/guardrails, solution pillars, high-level requirements, metrics, rollout, open questions.
-- **v2 (2026-02-18):** Adds implementation-directed **UX flows**, **state/edge-case rules**, a **measurement spec** (event names + properties + validation), and **experiment designs** per pillar.
-- **v3 (this doc, 2026-02-19):** Finalizes **API contracts**, **acceptance tests**, **launch gates** with thresholds, a **dependency tracker**, and **operational runbooks**.
-
 ---
 
 ## 1. Problem statement & context
 CRED Pay competes in a **commodity UPI landscape** where reliability and trust are differentiators, not table stakes. Offline **scan & pay** is the highest-frequency surface but also the most anxiety-inducing: flaky networks, PSP downtime, QR misuse, and delayed confirmations create uncertainty.
 
 Observable pain today:
-1. **Ambiguous pending states** — When PSP/bank callbacks lag, the UI oscillates between “processing” and “success” without clear guidance, prompting duplicate payments.
-2. **Weak merchant identity cues** — Many QRs are indistinguishable; users can’t confirm they paid the right merchant/person, undermining confidence.
-3. **Unstructured receipts** — Receipts bury the UTR, timestamp, and funding source, making proof-of-payment sharing/support painful.
-4. **Unsafe retry behavior** — Users are nudged to “try again” without knowing whether the first attempt will eventually settle, increasing double-debit risk and support tickets.
+1. **Ambiguous pending states** - When PSP/bank callbacks lag, the UI oscillates between “processing” and “success” without clear guidance, prompting duplicate payments.
+2. **Weak merchant identity cues** - Many QRs are indistinguishable; users can’t confirm they paid the right merchant/person, undermining confidence.
+3. **Unstructured receipts** - Receipts bury the UTR, timestamp, and funding source, making proof-of-payment sharing/support painful.
+4. **Unsafe retry behavior** - Users are nudged to “try again” without knowing whether the first attempt will eventually settle, increasing double-debit risk and support tickets.
 
 Consequence: **support contacts per 1k payments spikes on offline intents**, repeat rate drops, and rewards can’t compensate for lack of trust. To win repeat usage, CRED must make “scan & pay” **trustworthy by default**, even when rails misbehave.
 
@@ -55,15 +55,15 @@ Consequence: **support contacts per 1k payments spikes on offline intents**, rep
 
 ---
 
-## 4. Solution overview — “Offline Trust Pack”
+## 4. Solution overview - “Offline Trust Pack”
 Bundle of UX + system improvements aimed at **making state explicit** and **preventing duplicate actions**.
 
 **Pillars**
-1. **State clarity** — Deterministic UI states for *Processing*, *Pending*, *Success*, *Failure*, *Reversed*, with prescribed CTAs.
-2. **Receipt-first confirmation** — Merchant identity + amount + funding source + UTR + timestamp as the hero surface, with share/copy.
-3. **Safe retry guardrails** — Detect risky retries (same merchant + amount + short window) and guide user.
-4. **Merchant identity cues** — Preview card on scan + persistence through outcome states.
-5. **Support hooks** — Contextual support entry that auto-attaches structured diagnostic payload.
+1. **State clarity** - Deterministic UI states for *Processing*, *Pending*, *Success*, *Failure*, *Reversed*, with prescribed CTAs.
+2. **Receipt-first confirmation** - Merchant identity + amount + funding source + UTR + timestamp as the hero surface, with share/copy.
+3. **Safe retry guardrails** - Detect risky retries (same merchant + amount + short window) and guide user.
+4. **Merchant identity cues** - Preview card on scan + persistence through outcome states.
+5. **Support hooks** - Contextual support entry that auto-attaches structured diagnostic payload.
 
 **In-scope:** Offline scan & pay (static + dynamic QR), including pending/unknown resolution UX.
 
@@ -83,7 +83,7 @@ Bundle of UX + system improvements aimed at **making state explicit** and **prev
 ## 6. UX flows (primary + edge cases)
 Notation: `STATE / screen → action → next screen`.
 
-### 6.1 Offline scan & pay — happy path (fast rails)
+### 6.1 Offline scan & pay - happy path (fast rails)
 1. **Home** → tap **Scan**
 2. **Scanner** → QR lock → **Merchant preview**
    - Shows: merchant name (primary), VPA (secondary), “Paid here before” (if known), static/dynamic badge.
@@ -116,7 +116,7 @@ Trigger: no final confirmation within threshold.
    - Pending → **Success** OR Pending → **Failed** OR Pending → **Reversed**.
 
 **Pending SLA copy:**
-- Show a resolution expectation (e.g., “Usually resolves in ~2 minutes; can take up to 10 minutes.”) — set using PSP + historical data.
+- Show a resolution expectation (e.g., “Usually resolves in ~2 minutes; can take up to 10 minutes.”) - set using PSP + historical data.
 
 ### 6.3 Merchant identity uncertainty (new merchant)
 If merchant metadata is weak:
@@ -203,7 +203,7 @@ Receipt is considered **complete** only if it includes:
 ## 9. Instrumentation spec (events + properties)
 ### 9.1 Identity and joins
 All events must include:
-- `attempt_id` (UUID)
+- `attempt_id` (UUID) 
 - `user_id` (hashed)
 - `timestamp_ms`
 - `mode` = `offline_scan`
@@ -263,7 +263,7 @@ All events must include:
 - **Primary analysis:** offline-heavy cohorts (≥3 offline scans in last 14 days).
 - **Holdout required:** permanent 1–5% user holdout to prevent false positives from seasonality.
 
-### 10.2 Experiment A — Pending UX + guidance (state clarity)
+### 10.2 Experiment A - Pending UX + guidance (state clarity)
 **Hypothesis:** Explicit pending guidance reduces panic retries and support contacts without hurting conversion.
 
 - **Treatment:** new Pending screen + Check status + Wait & notify.
@@ -276,7 +276,7 @@ All events must include:
   - p95 time-to-terminal (no worse than +250ms when rails are fast)
 - **Go/no-go:** ship if panic retries drop ≥15% in pilot with guardrails green.
 
-### 10.3 Experiment B — Retry guardrail modal
+### 10.3 Experiment B - Retry guardrail modal
 **Hypothesis:** Guardrailed retry reduces duplicate debits and improves perceived trust.
 
 - **Treatment:** guardrail modal with decision capture.
@@ -287,7 +287,7 @@ All events must include:
   - % users who exit app from Pending (no worse than +1pp)
 - **Go/no-go:** adopt if duplicate attempts drop ≥20%.
 
-### 10.4 Experiment C — Receipt-first success surface
+### 10.4 Experiment C - Receipt-first success surface
 **Hypothesis:** Making receipt the hero reduces disputes and increases repeat usage.
 
 - **Treatment:** auto-open receipt card with Share + Copy UTR; merchant identity persistent.
@@ -297,7 +297,7 @@ All events must include:
 - **Secondary:** 7-day repeat scan rate.
 - **Guardrail:** median time-to-dismiss success screen (avoid slowing flow): +≤300ms.
 
-### 10.5 Experiment D — Merchant identity cues on scan preview
+### 10.5 Experiment D - Merchant identity cues on scan preview
 **Hypothesis:** Identity cues reduce wrong-merchant anxiety and improve completion.
 
 - **Treatment:** merchant preview card with “Paid here before” + confidence label.
@@ -321,7 +321,7 @@ Dependencies: state machine service changes, receipt caching, instrumentation up
 
 ---
 
-## 12. API contracts (v3)
+## 12. API contracts:
 > Purpose: make the implementation unambiguous across client, payments backend, and support tooling.
 
 ### 12.1 Entities
@@ -472,7 +472,7 @@ Request (excerpt)
 
 ---
 
-## 13. Acceptance tests (v3)
+## 13. Acceptance tests
 > “Done” means these pass in staging + dogfood builds.
 
 ### 13.1 State monotonicity
@@ -549,7 +549,7 @@ Pilot scope: city pilot (10%), offline-heavy cohort primary.
 
 ---
 
-## 15. Dependency tracker (v3)
+## 15. Dependency tracker
 | Workstream | Owner | Depends on | Deliverable | Target | Notes |
 | --- | --- | --- | --- | --- | --- |
 | Client state machine + UI | Mobile | Payments API `GET attempt` monotonicity | Processing/Pending/Receipt screens | W1 | Ensure idempotent rendering |
@@ -562,7 +562,7 @@ Pilot scope: city pilot (10%), offline-heavy cohort primary.
 
 ---
 
-## 16. Operational runbooks (v3)
+## 16. Operational runbooks
 ### 16.1 Monitoring
 Dashboards (must exist before pilot):
 - Attempt funnel: scan→auth→processing→pending→terminal
@@ -607,8 +607,8 @@ Dashboards (must exist before pilot):
 
 ---
 
-## 17. Open questions (carry-forward)
-1. Pending SLA copy: 5 vs 10 minutes — choose based on historical settlement.
+## 17. Open questions
+1. Pending SLA copy: 5 vs 10 minutes - choose based on historical settlement.
 2. Merchant verification: what’s the “verified” source of truth across PSPs?
 3. Should reward feedback appear inside receipt or remain separate?
 4. Exact push notification behavior for pending updates (rate limits, quiet hours).
