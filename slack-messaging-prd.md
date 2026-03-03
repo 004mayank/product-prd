@@ -1,16 +1,19 @@
 # PRD: Notification Load Shaping in Slack (Reduce Overload, Improve Response Reliability)
 
+<p align="center">
+  <img 
+    src="https://raw.githubusercontent.com/004mayank/product-teardowns/main/images/Slack.png" 
+    alt="Slack" 
+    width="200"
+  />
+</p>
+
 **Product:** Slack (Messaging)
 **Author:** Mayank Malviya
 **Status:** v3 - final 
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/slack-messaging-teardown.md
 
 ---
-
-## Version history
-- **v1 (initial):** Problem framing, core solution (bundling + focus modes + lightweight “needs you” labeling), baseline metrics + basic experiment outline.
-- **v2:** Adds **user stories & acceptance criteria**, **rigorous experiment design** (randomization, segmentation, power heuristics, ramp), and a detailed **rollout + kill-switch plan** to safely ship load-shaping.
-- **v3 (this revision / final):** Turns **“Needs your response”** into an executable spec: explicit scope boundaries, V1 heuristic classifier + ML progression path, offline + online evaluation plans with targets, failure modes/mitigations, and an **explainability + user-control UX contract**.
 
 ## Context
 Build **Notification Load Shaping** to help Slack users stay responsive to what matters (mentions, threads they’re involved in, high-signal channels) while **reducing notification fatigue** in busy workspaces.
