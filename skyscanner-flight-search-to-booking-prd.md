@@ -1,26 +1,22 @@
-# PRD v3: Flight Metasearch (Competitor) — Search → Booking Handoff
+# PRD Skyscanner - Search → Booking Handoff
 
-**Product:** Flight metasearch marketplace (Skyscanner competitor)  
+<p align="center">
+  <img 
+    src="https://raw.githubusercontent.com/004mayank/product-teardowns/main/images/Skyscanner.png" 
+    alt="Skyscanner" 
+    width="200"
+  />
+</p>
+
+**Product:** Skyscanner
 **Author:** Mayank Malviya  
 **Last updated:** 23 Feb 2026  
-**Status:** v3 — locked MVP, added concrete SLOs, clarified data contracts + governance thresholds, and specified Trust Pack scoring + UX states
+**Status:** Final- locked MVP, added concrete SLOs, clarified data contracts + governance thresholds, and specified Trust Pack scoring + UX states
 
-> This PRD defines a competitor to Skyscanner focused on the Flights funnel from **search → results → itinerary detail → partner selection → booking handoff**, differentiated by a first-class **Trust Pack** (price confidence, rules clarity, partner reliability).
-
+> This PRD defines Skyscanner focused on the Flights funnel from **search → results → itinerary detail → partner selection → booking handoff**, differentiated by a first-class **Trust Pack** (price confidence, rules clarity, partner reliability).
 ---
 
-## v3 changelog (vs v2)
-- Locked **MVP scope** to one launch market + route set; clarified what is explicitly out of scope for v3.
-- Added concrete **performance SLOs** (TTFR, filter latency, redirect success), plus reliability/error budgets.
-- Specified **data contracts** and identifier strategy (itinerary_signature, offer_id, click_id), including bounce-back attribution.
-- Upgraded **Trust Pack** into a scored model with thresholds, calibration plan, and UX fallback states.
-- Made **Partner governance** actionable with volume thresholds, penalty ladder, and partner-facing reporting.
-- Added detailed **edge cases** (sold out, repricing, currency/locale drift) and SRP/detail UX behavior.
-- Strengthened **experiment design** (A/B cells, ramp criteria) and post-launch ops (dashboards, alerts).
-
----
-
-## 0) TL;DR
+## TL;DR
 Build a flight comparison product that wins on **trust + clarity** while keeping search fast and click-out high.
 
 Core surfaces:
@@ -29,7 +25,7 @@ Core surfaces:
 3) Itinerary detail page with **Partner List** + **Trust Pack**
 4) Redirect handoff with robust tracking and mismatch instrumentation
 
-**Primary differentiator:** Make *price/rules/partner risk legible before click-out*—and create enforcement loops when partners misbehave.
+**Primary differentiator:** Make *price/rules/partner risk legible before click-out*-and create enforcement loops when partners misbehave.
 
 ---
 
@@ -165,7 +161,7 @@ We do not attempt to beat Skyscanner on partner coverage initially.
 - “Sold out” / “Price changed” states per seller inside a cluster (do not remove silently)
 
 **Error/empty states**
-- If aggregation fails partially: show partial results with banner “Some partners unavailable—showing available results.”
+- If aggregation fails partially: show partial results with banner “Some partners unavailable-showing available results.”
 - If no results: show filters reset + alternative dates (if available) + nearby airports suggestion.
 
 **Performance & perceived latency**
@@ -416,7 +412,7 @@ Maximize user satisfaction and trusted click-outs, not just cheapest price.
 
 ---
 
-## 15) Performance & reliability SLOs (v3)
+## 15) Performance & reliability SLOs
 ### User-facing performance
 - SRP TTFR p95:
   - **Mobile web:** ≤ 2.5s
@@ -441,12 +437,12 @@ Maximize user satisfaction and trusted click-outs, not just cheapest price.
 3) Expand routes within market
 4) Expand partners once trust metrics stabilize
 
-### Experiments (v3)
+### Experiments
 - Interstitial ON vs OFF for Trusted partners (keep ON for New/Caution)
 - Best ranking weights: trust-heavy vs price-heavy
 - Trust Pack display density: chips-only vs chips + “Why?” affordance
 
-### Go/no-go gates (v3)
+### Go/no-go gates
 - Mismatch proxy rate below threshold for 2 consecutive weeks
 - Bounce-back rate stable/improving
 - TTFR p95 within SLO
@@ -455,7 +451,7 @@ Maximize user satisfaction and trusted click-outs, not just cheapest price.
 ---
 
 ## 17) Open questions
-1) Which launch market (geo/routes) do we target for v3?
+1) Which launch market (geo/routes) do we target ?
 2) Which partners are available and what deep-link/attribution constraints exist?
 3) Minimum viable rules normalization: which baggage/refund fields must be present for “Clear”?
 4) Do we optimize primarily for cheapest or for “trusted best” as the default?
