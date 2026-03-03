@@ -10,7 +10,7 @@ Each PRD focuses on:
 - Trade-offs and constraints
 - Execution-ready thinking
 
-These documents are not theoretical exercises — they are derived from
+These documents are not theoretical exercises - they are derived from
 real product analysis, teardowns, and practical PM workflows.
 
 ---
@@ -46,9 +46,14 @@ reason about, and communicate product decisions.
 
 ## PRDs
 
-- **Zomato - Reduce Checkout Abandonment**  
-  Focus: Improving cart → order conversion by reducing price shock and friction  
-  Status: v1
+- **Zomato - Reduce Checkout Abandonment**
+- **Whatsapp - Messaging**
+- **Slack - Messaging**
+- **Instagram - DMs**
+- **Cred - UPI**
+- **Lovable - Improve Iteration Trust**
+- **Skyscanner - Search To Booking**
+- **Linkedin - Signal Density**
 
 More PRDs will be added iteratively as part of ongoing product exploration.
 
