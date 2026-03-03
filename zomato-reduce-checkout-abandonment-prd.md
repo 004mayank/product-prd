@@ -10,13 +10,7 @@
 
 **Product:** Zomato - Food Delivery  
 **Author:** Mayank Malviya  
-**Status:** v2 — Requirements + instrumentation ready for build partner review
-
----
-
-## Changelog
-- **v2 (2026-02-18):** Structured the solution into three shippable pillars with user stories, acceptance criteria, UX copy, and edge-case handling. Added instrumentation/event schema, experiment design (success + guardrails + sample sizing heuristics), rollout/kill-switch plan, and explicit dependencies/questions for eng, design, and pricing/offer teams.
-- **v1 (2026-02-17):** Problem framing, high-level solution ideas, initial metrics, and experiment outlines.
+**Status:** v2 - Requirements + instrumentation ready for build partner review
 
 ---
 
@@ -63,9 +57,9 @@ Key journeys covered: Mobile app cart review → checkout → payment selection 
 ---
 
 ## 5. Solution Pillars
-1. **Early Price Transparency** — display an estimated payable amount (items + fees + taxes) in-cart, before checkout CTA.
-2. **Offer Decisioning & Explanation** — auto-apply the best offer, surface "why" copy, and allow override without modal hopping.
-3. **Checkout Confidence Nudges** — reassure users post-offer decision with ETA validation, fee lock message, and fallback copy for failure states.
+1. **Early Price Transparency** - display an estimated payable amount (items + fees + taxes) in-cart, before checkout CTA.
+2. **Offer Decisioning & Explanation** - auto-apply the best offer, surface "why" copy, and allow override without modal hopping.
+3. **Checkout Confidence Nudges** - reassure users post-offer decision with ETA validation, fee lock message, and fallback copy for failure states.
 
 Each pillar ships as a feature flagged module but is designed to work cumulatively.
 
@@ -156,12 +150,12 @@ Each pillar ships as a feature flagged module but is designed to work cumulative
 ---
 
 ## 8. Experimentation Strategy
-1. **Phase 0 (dogfood + design QA)** — internal ramp, focus on instrumentation accuracy.
-2. **Phase 1 (10% traffic A/B)** — Treatment = Pillar 1+2, control = current experience.
+1. **Phase 0 (dogfood + design QA)** - internal ramp, focus on instrumentation accuracy.
+2. **Phase 1 (10% traffic A/B)** - Treatment = Pillar 1+2, control = current experience.
    - Run until 95% power to detect 1 p.p. lift (~3–4 days at peak traffic).
    - Guardrails: payment error rate, refund contact rate.
-3. **Phase 2 (25% traffic)** — Add Pillar 3, monitor user support tags and cancellation rate.
-4. **Phase 3 (100% rollout)** — region-wise (top 8 cities first). Maintain kill-switch per pillar (feature flag) with alerting on metric regressions (PagerDuty on conversion drop >1 p.p. for 2 hrs).
+3. **Phase 2 (25% traffic)** - Add Pillar 3, monitor user support tags and cancellation rate.
+4. **Phase 3 (100% rollout)** - region-wise (top 8 cities first). Maintain kill-switch per pillar (feature flag) with alerting on metric regressions (PagerDuty on conversion drop >1 p.p. for 2 hrs).
 
 Experiment analysis plan: run stratified cuts (new vs repeat, order value buckets) and log-likelihood ratio test on conversion. Document results in PRD appendix before graduating feature.
 
@@ -202,4 +196,4 @@ Experiment analysis plan: run stratified cuts (new vs repeat, order value bucket
 ---
 
 ## 12. Final Takeaway
-We are not changing Zomato’s fee model—we are aligning **expectations + confidence** earlier so users don’t abandon when friction spikes. By coupling price clarity, automatic savings, and checkout reassurance with tight instrumentation, we can lift conversion now while unlocking richer, earlier experimentation (e.g., listing-level price previews) once this foundation is stable.
+We are not changing Zomato’s fee model-we are aligning **expectations + confidence** earlier so users don’t abandon when friction spikes. By coupling price clarity, automatic savings, and checkout reassurance with tight instrumentation, we can lift conversion now while unlocking richer, earlier experimentation (e.g., listing-level price previews) once this foundation is stable.
