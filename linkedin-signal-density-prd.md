@@ -2,7 +2,7 @@
 
 **Product:** LinkedIn (Core Feed + Notifications)
 **Author:** Mayank Malviya
-**Status:** v2 — detailed scope, metrics spec, experiments, and rollout plan
+**Status:** v3 — end-to-end spec (SDS instrumentation), mode UX variants, creator incentives, anti-gaming, and operational playbook
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/linkedin-teardown.md
 
 ---
@@ -10,6 +10,7 @@
 ## Version history
 - **v1 (2026-03-02):** Initial problem framing + MVP requirements for an opt-in “Signal Density” feed mode.
 - **v2 (2026-03-03):** Clarified outcome definition (SDS), ranking/UX requirements, experiment design, operational guardrails, integrity workflows, and phased rollout.
+- **v3 (2026-03-04):** Added SDS event schema + computation notes, mode variants (Lite/Strict + scheduling), proof-of-work incentives, anti-gaming protections, notification strategy, and an ops playbook (kill-switches + review queues).
 
 ---
 
@@ -35,7 +36,7 @@ The v2 plan makes the initiative measurable (via a concrete SDS spec), shippable
 
 ---
 
-## 2) Goals / Non-goals (v2)
+## 2) Goals / Non-goals (v3)
 ### Goals
 1. **Increase signal consumption efficiency** for opted-in users: more credible updates per scroll.
 2. **Reduce negative feedback**: lower hide/report rate for opted-in users by **≥15%** vs control.
@@ -133,7 +134,7 @@ We also compute:
 
 ---
 
-## 7) Detailed product requirements (v2)
+## 7) Detailed product requirements (v3)
 ### 7.1 Entry points & UX
 **Entry points:**
 - Above feed: chip/toggle next to existing controls.
@@ -217,6 +218,58 @@ Introduce `signal_density_multiplier` applied post-core rank in the pipeline.
 
 All feedback must be logged with `mode_state=signal_density`.
 
+### 7.6 Mode variants (Lite vs Strict) + scheduling
+To avoid a single “one size fits all” toggle, v3 supports two internally-configurable variants under the same user-facing label.
+
+- **Signal Density (Lite)** (default for v3): modest suppression of low-signal templates + boosts for proof/credibility.
+  - Intended for broad rollout.
+  - Multiplier range: 0.85–1.2
+- **Signal Density (Strict)** (pilot): aggressively prioritize proof-of-work + reduce reshared/templated content.
+  - Intended for power users + recruiters.
+  - Multiplier range: 0.7–1.3
+
+**Optional scheduling (pilot):** “Enable during work hours” (Mon–Fri, 9–6 local). Persisted as a preference; ranking reads `mode_state` + `schedule_state`.
+
+### 7.7 Proof-of-work incentives (make the good path easy)
+We should not only demote low-signal content; we must increase the supply of high-signal content.
+
+**Creation-time nudges (soft):**
+- If the draft matches a low-signal template, show a non-blocking prompt: “Add proof to improve reach in Signal Density mode.”
+- Suggested add-ons: attachment, link, numbers, “what changed + why” bullets.
+
+**Badges (read-side):**
+- “Proof of work” badge when artifact confidence is high (attachment/link + depth cues).
+- “Verified employment” badge when identity strength is high.
+
+**Creator analytics (later):** add a small insight: “X% of your impressions came from Signal Density mode.” (guarded; avoid shadow-ban narratives).
+
+### 7.8 Anti-gaming protections (integrity by design)
+Signal Density will be a new target for spam. Add explicit anti-gaming constraints.
+
+- **Template farms:** detect repeated n-gram/structure across accounts; apply a penalty even if they add superficial artifacts.
+- **Artifact spoofing:** downweight low-quality or irrelevant attachments/links (mismatch between text topic and link domain; repeated link domains across farm).
+- **Engagement pods:** incorporate network-collusion heuristics into Trust Vector (ablation-gated; integrity-owned).
+- **Rate limits:** cap consecutive boosted impressions from a single author to avoid exploitation.
+
+### 7.9 Notifications & digests (close the loop)
+Notifications are the re-entry lever for this mode.
+
+- Add an experiment-only digest module: “Today’s high-signal updates” with 3–5 items from the mode’s ranking.
+- Push notification eligibility rules:
+  - Only for opted-in users.
+  - Only for items above a high-confidence threshold (Trust Vector + High-Signal).
+  - Frequency capped (e.g., 1/day).
+
+### 7.10 Operational requirements (kill switches + reviewer queues)
+- **Kill switches:**
+  - global: disable mode ranking multiplier
+  - component-level: disable Trust Vector, classifier, negative-feedback penalty, emerging-expert boost
+- **False-positive budget:** aim <5% demotion among a curated “known quality” creator list.
+- **Reviewer queue:** weekly sampling of:
+  - top demotions (what got suppressed)
+  - top promotions (what got boosted)
+  - appeal reports from creators
+
 ---
 
 ## 8) User stories & acceptance criteria (updated)
@@ -234,7 +287,7 @@ All feedback must be logged with `mode_state=signal_density`.
 
 ---
 
-## 9) Experiment design (v2)
+## 9) Experiment design (v3)
 ### 9.1 Cohorts
 - Dogfood: employees + creator advisory board (~5k)
 - Beta: power users (≥5 sessions/week) + recruiters segment
@@ -307,8 +360,58 @@ All feedback must be logged with `mode_state=signal_density`.
 
 ---
 
-## 14) Open questions for v2 → v3
-1. Make mode default during work hours for specific cohorts?
-2. How to treat newsletters/articles inside mode (inline vs link-out)?
-3. How to incentivize proof artifacts (templates, prompts, upload flows)?
-4. Unify reputation: can Trust Vector also gate invites/messages safely?
+## 14) Appendix — SDS instrumentation & computation notes
+### 14.1 Required events
+Log a single canonical event for every feed impression in the mode pipeline.
+
+**Event: `feed_impression`** (per impression)
+- `member_id` (hashed)
+- `session_id`
+- `post_urn`
+- `mode_state` (standard|signal_density)
+- `mode_variant` (lite|strict)
+- `rank_score_base`
+- `signal_density_multiplier`
+- `rank_score_final`
+- `high_signal_label` (high|medium|low|unknown)
+- `high_signal_confidence` (0–1)
+- `trust_vector_score` (0–1)
+- `neg_feedback_risk` (0–1)
+- `reasons[]` (top N strings: verified_role, proof_artifact, industry_match, etc.)
+
+**Event: `feed_action`** (per action)
+- `session_id`, `post_urn`, `mode_state`, `action_type`
+- `action_type` ∈ {dwell, click_link, save, share, comment, hide, not_interested, report, follow_author}
+- `dwell_ms` (for dwell)
+
+**Event: `mode_toggle`**
+- `member_id`, `timestamp`, `from_state`, `to_state`, `entry_point` (chip|settings|prompt)
+- `schedule_enabled` (bool)
+
+### 14.2 SDS computation (reference)
+Compute SDS per session and per member-day.
+
+- `HighSignalImpression` = (`high_signal_label` == high) AND (`high_signal_confidence` ≥ threshold) AND (`trust_vector_score` ≥ threshold)
+- Session SDS = Σ weights / total_impressions
+  - weight = 1.0 for HighSignalImpression
+  - +0.5 if dwell_ms ≥ N
+  - +1.0 if meaningful action (save/share/comment>threshold/click_link)
+
+Also compute (and dashboard):
+- regret rate = (hide + not_interested + report) / impressions
+- low-signal exposure rate (label==low)
+- concentration = top-author impression share (anti-farm signal)
+
+### 14.3 Dashboards + alerts (minimum)
+- SDS trend + regret trend (daily)
+- guardrails (depth, RPM) (daily)
+- false-positive audit set performance (weekly)
+- fairness slices (tenure, region, connection count) (weekly)
+
+---
+
+## 15) Open questions for v3 → v4
+1. Should Signal Density become a *default* for specific segments (recruiters, hiring managers) with an easy escape hatch?
+2. Should we expose a user-facing slider (More signal ↔ More variety), or keep variants internal to avoid complexity?
+3. How do we handle newsletters/long-form: boost only when “new information density” is detected, or treat as a separate lane?
+4. Can Trust Vector be safely reused to gate invitations/DMs without creating opaque “social credit” concerns (policy + UX implications)?
