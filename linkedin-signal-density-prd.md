@@ -6,7 +6,7 @@
   />
 </p>
 
-#LinkedIn Signal Density Feed Mode (Reduce Low-Signal Content, Protect Trust)
+## PRD: LinkedIn Signal Density Feed Mode (Reduce Low-Signal Content, Protect Trust)
 
 **Product:** LinkedIn (Core Feed + Notifications)
 **Author:** Mayank Malviya
