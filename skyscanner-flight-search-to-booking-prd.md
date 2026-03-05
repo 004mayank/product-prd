@@ -1,4 +1,4 @@
-# PRD Skyscanner - Search → Booking Handoff
+# PRD: Skyscanner - Search → Booking Handoff
 
 <p align="center">
   <img 
