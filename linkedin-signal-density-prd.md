@@ -1,20 +1,20 @@
-# PRD: LinkedIn Signal Density Feed Mode (Reduce Low-Signal Content, Protect Trust)
+<p align="center">
+  <img 
+    src="https://raw.githubusercontent.com/004mayank/product-teardowns/main/images/Linkedin.png" 
+    alt="Linkedin" 
+    width="200"
+  />
+</p>
+
+#LinkedIn Signal Density Feed Mode (Reduce Low-Signal Content, Protect Trust)
 
 **Product:** LinkedIn (Core Feed + Notifications)
 **Author:** Mayank Malviya
-**Status:** v3 — end-to-end spec (SDS instrumentation), mode UX variants, creator incentives, anti-gaming, and operational playbook
+**Status:** end-to-end spec (SDS instrumentation), mode UX variants, creator incentives, anti-gaming, and operational playbook
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/linkedin-teardown.md
-
 ---
 
-## Version history
-- **v1 (2026-03-02):** Initial problem framing + MVP requirements for an opt-in “Signal Density” feed mode.
-- **v2 (2026-03-03):** Clarified outcome definition (SDS), ranking/UX requirements, experiment design, operational guardrails, integrity workflows, and phased rollout.
-- **v3 (2026-03-04):** Added SDS event schema + computation notes, mode variants (Lite/Strict + scheduling), proof-of-work incentives, anti-gaming protections, notification strategy, and an ops playbook (kill-switches + review queues).
-
----
-
-## 0) Executive summary
+## Executive summary
 LinkedIn’s core feed is drifting toward **low-signal, templated, engagement-bait content** (worse with AI), which erodes trust and reduces the value of LinkedIn’s identity graph. Users compensate by muting, hiding, abandoning the feed, or moving their “signal consumption” to newsletters and external communities.
 
 This PRD proposes a first-class **Signal Density Mode**: an explicitly labeled feed mode that prioritizes **credible professional updates** (job changes, product launches, researched insights, data-backed posts) using LinkedIn’s differentiated signals (identity strength, reputation, proof-of-work artifacts) while holding engagement and revenue within guardrails.
@@ -36,7 +36,7 @@ The v2 plan makes the initiative measurable (via a concrete SDS spec), shippable
 
 ---
 
-## 2) Goals / Non-goals (v3)
+## 2) Goals / Non-goals
 ### Goals
 1. **Increase signal consumption efficiency** for opted-in users: more credible updates per scroll.
 2. **Reduce negative feedback**: lower hide/report rate for opted-in users by **≥15%** vs control.
@@ -44,7 +44,7 @@ The v2 plan makes the initiative measurable (via a concrete SDS spec), shippable
 4. **Protect downstream trust loops**: no degradation in invite acceptance, InMail reply rate, and spam reports (lagging guardrails).
 
 ### Non-goals
-- Replace the default feed for all users in v2.
+- Replace the default feed for all users.
 - Solve job postings spam or DMs spam directly (we only reduce upstream exposure / route reputation signals).
 - Launch a paid tier.
 
@@ -84,7 +84,7 @@ A post is considered **High Signal** if it satisfies at least one **Signal Type*
 - **Identity strength** above threshold OR **network trust** above threshold
 - **Negative feedback risk** below threshold (historical hide/report ratio, spam flags)
 
-### 4.2 Signal Density Score (SDS) — session-level
+### 4.2 Signal Density Score (SDS) - session-level
 SDS is a weighted index per session for opted-in users.
 
 **SDS = (Σ w_i * HighSignalImpression_i) / TotalImpressions**, where weights reflect depth.
@@ -119,22 +119,22 @@ We also compute:
 ---
 
 ## 6) Solution overview
-### Pillar A — Signal Density Mode (user-facing)
+### Pillar A - Signal Density Mode (user-facing)
 - A distinct, named mode in feed UI: **“Signal Density”**.
 - Explicitly communicates tradeoff: “More credible updates, less viral filler.”
 - One-tap exit (revert to standard feed).
 
-### Pillar B — Trust Vector + High-Signal classifier
+### Pillar B - Trust Vector + High-Signal classifier
 - **Trust Vector**: author/post composite score used as input to ranking.
 - **High-Signal classifier**: ML model (or staged heuristics → ML) to label content type and depth.
 
-### Pillar C — Explainability + feedback loops
+### Pillar C - Explainability + feedback loops
 - Mode-specific “Why am I seeing this?”
 - Mode-specific feedback actions to improve future ranking.
 
 ---
 
-## 7) Detailed product requirements (v3)
+## 7) Detailed product requirements
 ### 7.1 Entry points & UX
 **Entry points:**
 - Above feed: chip/toggle next to existing controls.
@@ -196,7 +196,7 @@ Introduce `signal_density_multiplier` applied post-core rank in the pipeline.
 - Author profile: daily batch
 - Post profile: near-real-time stream; 5-minute freshness target
 
-### 7.4 High-Signal classifier (v2 plan)
+### 7.4 High-Signal classifier
 **Phase 1 (ship fast):** rules + weak model
 - Identify obvious low-signal templates (generic motivational patterns).
 - Detect proof artifacts (links, attachments, numbers, citations).
@@ -219,9 +219,9 @@ Introduce `signal_density_multiplier` applied post-core rank in the pipeline.
 All feedback must be logged with `mode_state=signal_density`.
 
 ### 7.6 Mode variants (Lite vs Strict) + scheduling
-To avoid a single “one size fits all” toggle, v3 supports two internally-configurable variants under the same user-facing label.
+To avoid a single “one size fits all” toggle, this PRD supports two internally-configurable variants under the same user-facing label.
 
-- **Signal Density (Lite)** (default for v3): modest suppression of low-signal templates + boosts for proof/credibility.
+- **Signal Density (Lite)** : modest suppression of low-signal templates + boosts for proof/credibility.
   - Intended for broad rollout.
   - Multiplier range: 0.85–1.2
 - **Signal Density (Strict)** (pilot): aggressively prioritize proof-of-work + reduce reshared/templated content.
@@ -287,7 +287,7 @@ Notifications are the re-entry lever for this mode.
 
 ---
 
-## 9) Experiment design (v3)
+## 9) Experiment design
 ### 9.1 Cohorts
 - Dogfood: employees + creator advisory board (~5k)
 - Beta: power users (≥5 sessions/week) + recruiters segment
@@ -360,7 +360,7 @@ Notifications are the re-entry lever for this mode.
 
 ---
 
-## 14) Appendix — SDS instrumentation & computation notes
+## 14) Appendix - SDS instrumentation & computation notes
 ### 14.1 Required events
 Log a single canonical event for every feed impression in the mode pipeline.
 
@@ -410,7 +410,7 @@ Also compute (and dashboard):
 
 ---
 
-## 15) Open questions for v3 → v4
+## 15) Open questions
 1. Should Signal Density become a *default* for specific segments (recruiters, hiring managers) with an easy escape hatch?
 2. Should we expose a user-facing slider (More signal ↔ More variety), or keep variants internal to avoid complexity?
 3. How do we handle newsletters/long-form: boost only when “new information density” is detected, or treat as a separate lane?
