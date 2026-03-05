@@ -1,29 +1,18 @@
-# PRD: Improve Conversation Health in Instagram DMs (Reduce TTFR, Improve CCR)
+<p align="center">
+  <img 
+    src="https://raw.githubusercontent.com/004mayank/product-teardowns/main/images/whatsapp.png" 
+    alt="Whatsapp" 
+    width="200"
+  />
+</p>
+
+
+# PRD: Improve Conversation Health in Instagram DMs
 
 **Product:** Instagram (DMs)  
 **Author:** Mayank Malviya  
-**Status:** v3 — shipped-ready spec (final thresholds, copy, dependencies, go/no-go)  
+**Status:** v3 - shipped-ready spec (final thresholds, copy, dependencies, go/no-go)  
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/instagram-dms-teardown.md
-
----
-
-## Changelog
-### v3 (this revision)
-- Finalized **eligibility logic** (scoring + caps) for *Needs reply* and *Open loops*.
-- Added **user-facing copy options**, recommended default strings, and “tone” constraints.
-- Added **go/no-go launch criteria**, monitoring, and stop conditions.
-- Added **dependencies** + implementation notes (client vs server, storage, flags).
-- Resolved key open questions with recommendations.
-
-### v2
-- Converted “proposed solutions” into **P0/P1 requirements** with **acceptance criteria**.
-- Added a concrete **information architecture** for: *Needs reply* state, *Requests triage*, *Open loops* module.
-- Added **analytics/event schema**, experiment design details, and guardrail definitions.
-- Added **privacy/integrity considerations** and explicit mitigations (spam amplification, anxiety/clutter).
-- Tightened rollout plan with **feature gates** and sequencing.
-
-### v1
-- Problem framing, metrics, and execution-ready proposals.
 
 ---
 
@@ -77,7 +66,7 @@ Observable PM problem: **high-intent inbound messages are missed or replied to l
 - Story replies are both **high-signal** (contextual) and **high-volume** (overload risk).
 - Users can tolerate assistance, but not pressure; prioritization must be subtle, optional, and reversible.
 
-**Operational definition:** “High-intent” = inbound messages that are (a) recent, (b) unreplied-to, and (c) higher likelihood of needing action based on *explicit* context + lightweight heuristics — **not** deep semantic interpretation.
+**Operational definition:** “High-intent” = inbound messages that are (a) recent, (b) unreplied-to, and (c) higher likelihood of needing action based on *explicit* context + lightweight heuristics - **not** deep semantic interpretation.
 
 ---
 
@@ -117,13 +106,13 @@ Request arrives → user opens Requests → identifies legit vs spam → Accept/
 
 ---
 
-## 7) Solutions → requirements (v3)
+## 7) Solutions → requirements
 
 ### Solution 1: “Needs reply” state for DMs (lightweight prioritization)
 **User promise:** “When you open DMs, it’s obvious which threads are waiting on you.”
 
 #### P0 requirements
-- **FR1 — Eligibility (rules + scoring):** System must mark a thread as *Needs reply* if it is **eligible** and passes a conservative **score threshold**.
+- **FR1 - Eligibility (rules + scoring):** System must mark a thread as *Needs reply* if it is **eligible** and passes a conservative **score threshold**.
   - **Hard eligibility gates (must all be true):**
     - last message inbound (other user)
     - no outbound message after that inbound
@@ -139,16 +128,16 @@ Request arrives → user opens Requests → identifies legit vs spam → Accept/
     - +1: **mutual follow** / strong graph signal available
     - +1: inbound age ≤ 24h
   - **Threshold:** mark as Needs reply when score ≥ **4**.
-- **FR2 — Visibility:** Must render a low-salience row indicator in DM list.
-- **FR3 — Mark handled:** Must allow user to remove indicator per thread.
-- **FR4 — Saturation cap:** Must cap Needs reply to avoid “everything urgent”.
+- **FR2 - Visibility:** Must render a low-salience row indicator in DM list.
+- **FR3 - Mark handled:** Must allow user to remove indicator per thread.
+- **FR4 - Saturation cap:** Must cap Needs reply to avoid “everything urgent”.
   - Default: show at most **min(5, 10% of first screen threads)**.
-- **FR5 — Persistence:** Mark-handled state persists until (a) new inbound arrives or (b) 14 days.
+- **FR5 - Persistence:** Mark-handled state persists until (a) new inbound arrives or (b) 14 days.
 
 #### P1 requirements
-- **FR6 — Segment tuning:** Support different caps/thresholds for high-volume users.
+- **FR6 - Segment tuning:** Support different caps/thresholds for high-volume users.
   - Creators/SMBs default: same threshold (≥4) but cap can be higher (e.g., max 7) if saturation remains low.
-- **FR7 — Explainability (light):** Optional “Why this?” with *explicit* reason (Story reply / Question / Verified).
+- **FR7 - Explainability (light):** Optional “Why this?” with *explicit* reason (Story reply / Question / Verified).
 
 #### Acceptance criteria (samples)
 - Given a story reply received 2h ago and unreplied, when opening DM list, then it is labeled Needs reply.
@@ -161,13 +150,13 @@ Request arrives → user opens Requests → identifies legit vs spam → Accept/
 **User promise:** “Requests are quicker to clear, and legit requests are easier to spot.”
 
 #### P0 requirements
-- **FR8 — One-tap actions:** Requests must expose Accept, Delete, Report/Block with minimal friction.
-- **FR9 — Trust/context signals:** Must show explicit signals (verified, mutuals, shared groups, prior interaction) when available.
-- **FR10 — Likely spam bucket:** Must support separate “Likely spam” view using existing classification.
-- **FR11 — Logging:** Must log action taken + which signals were displayed.
+- **FR8 - One-tap actions:** Requests must expose Accept, Delete, Report/Block with minimal friction.
+- **FR9 - Trust/context signals:** Must show explicit signals (verified, mutuals, shared groups, prior interaction) when available.
+- **FR10 - Likely spam bucket:** Must support separate “Likely spam” view using existing classification.
+- **FR11 - Logging:** Must log action taken + which signals were displayed.
 
 #### P1 requirements
-- **FR12 — Bulk handling:** Multi-select + bulk delete/report for power users.
+- **FR12 - Bulk handling:** Multi-select + bulk delete/report for power users.
 
 ---
 
@@ -175,16 +164,16 @@ Request arrives → user opens Requests → identifies legit vs spam → Accept/
 **User promise:** “After time away, DMs help you pick up where you left off.”
 
 #### P0 requirements
-- **FR13 — Show only when justified:** Open loops module appears only if:
+- **FR13 - Show only when justified:** Open loops module appears only if:
   - last DM session > **6h**, and
   - open loops count ≥ **2** (or ≥1 for creator/SMB), and
   - not shown already in last **24h** (frequency cap).
-- **FR14 — Contents (explicit only):** Needs reply threads + pending Requests + explicit mentions in group contexts.
-- **FR15 — Dismiss:** Dismiss hides for session; do not re-show until next day unless open loops spike (e.g., +5).
+- **FR14 - Contents (explicit only):** Needs reply threads + pending Requests + explicit mentions in group contexts.
+- **FR15 - Dismiss:** Dismiss hides for session; do not re-show until next day unless open loops spike (e.g., +5).
 
 ---
 
-## 8) UX spec (v3)
+## 8) UX spec 
 
 ### A) DM list row
 - Indicator: small pill.
@@ -216,7 +205,7 @@ Request arrives → user opens Requests → identifies legit vs spam → Accept/
 
 ---
 
-## 9) Analytics & experimentation (v3)
+## 9) Analytics & experimentation
 
 ### Event schema (minimal)
 All events include: user_id hash, surface, experiment_variant, timestamp.
@@ -259,7 +248,7 @@ Stop / roll back if:
 
 ---
 
-## 11) Dependencies & implementation notes (v3)
+## 11) Dependencies & implementation notes
 - **Client (iOS/Android):** UI pill rendering, module surface, overflow actions.
 - **Server or local state:**
   - Eligibility can start client-side (heuristics) if needed; preferred: server-provided flags per thread for consistency.
@@ -279,7 +268,7 @@ Stop / roll back if:
 
 ---
 
-## 13) Open questions (resolved in v3)
+## 13) Open questions
 - **Copy for Needs reply:** Recommend **“Reply”** pill + “To reply” module title; avoid guilt.
 - **Creator vs everyday behavior:** Keep same threshold; adjust cap (creators can see a few more) after saturation monitoring.
 - **Policy-safe signals:** Prefer explicit context (story reply, verified, mutuals) + `?`; avoid semantic intent classification.
@@ -288,4 +277,4 @@ Stop / roll back if:
 ---
 
 ## 14) Summary
-This PRD improves Instagram DM conversation health by making **unreplied, high-likelihood threads** easier to spot and finish (Needs reply), reducing Requests triage friction, and resurfacing open loops after time away—while protecting against spam amplification and anxiety.
+This PRD improves Instagram DM conversation health by making **unreplied, high-likelihood threads** easier to spot and finish (Needs reply), reducing Requests triage friction, and resurfacing open loops after time away-while protecting against spam amplification and anxiety.
