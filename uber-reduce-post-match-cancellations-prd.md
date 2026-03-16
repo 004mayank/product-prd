@@ -1,15 +1,17 @@
+<p align="center">
+  <img 
+    src="https://raw.githubusercontent.com/004mayank/product-teardowns/main/images/uber.png" 
+    alt="Uber Logo" 
+    width="200"
+  />
+</p>
+
+
 # PRD: Reduce Post‑Match Cancellations in Uber via a “Pickup Quality Pack”
 
-**Product:** Uber — Ride-hailing (Rider + Driver apps)  
+**Product:** Uber - Ride-hailing (Rider + Driver apps)  
 **Author:** Mayank Malviya  
-**Status:** v3 — User journeys + UX copy + service dependencies + rollout checklist (ready for exec + eng kickoff)
-
----
-
-## Changelog
-- **v3 (2026-03-13):** Added end-to-end user journeys, concrete UX copy placeholders, clarified system/service dependencies + failover, expanded experimentation (ramp + stop criteria), added rollout checklist and reason-code dictionary for explainability.
-- **v2 (2026-03-12):** Tightened MVP scope (what ships vs later), added cancellation taxonomy + targeting strategy, clarified pickup difficulty scoring inputs/outputs, added rollout/ops plan, and expanded requirements + edge cases.
-- **v1 (2026-03-11):** First cut PRD derived from `product-teardowns/uber-ridehailing-teardown.md` (pickup loop + cancellation taxonomy). Focused on a single outcome: reduce post‑match cancellations by improving pickup rendezvous success.
+**Status:** v3 - User journeys + UX copy + service dependencies + rollout checklist (ready for exec + eng kickoff)
 
 ---
 
@@ -80,7 +82,7 @@ We need a taxonomy that is actionable (design/ops) and measurable (instrumentati
 - Hard pickup / rider not found
 - Illegal stop / no-stopping / enforcement risk
 - Rider not ready / long wait / poor communication
-- Trip not worth it (distance, direction) — *not targeted by this PRD*
+- Trip not worth it (distance, direction) - *not targeted by this PRD*
 
 ### 4.2 “Pickup-related” vs “non-pickup-related”
 For attribution, treat as pickup-related if any are true:
@@ -123,7 +125,7 @@ So v3 should:
 ## 7) Proposed solution: Pickup Quality Pack
 A feature bundle that upgrades pickup coordination with three modules, behind flags.
 
-### Module A — Rider Guided Pickup Pin (contextual)
+### Module A - Rider Guided Pickup Pin (contextual)
 **What:** When predicted “hard pickup”, show a lightweight guided flow to confirm pickup:
 - Entrance/gate selection (if relevant)
 - Landmark confirmation (from POI template + common text)
@@ -131,13 +133,13 @@ A feature bundle that upgrades pickup coordination with three modules, behind fl
 
 **Principle:** Only show when prediction confidence is high; otherwise keep default “set pickup” UX.
 
-### Module B — Driver Pickup Difficulty Cue + Templates (+ optional best stop)
+### Module B - Driver Pickup Difficulty Cue + Templates (+ optional best stop)
 **What:** On driver navigation/arrival:
 - Label pickup as **Easy / Medium / Hard** with a specific reason
 - Provide 1‑tap suggested message templates tied to rider’s selection
 - Optional: show a “best stop” waypoint only when confidence is strong (otherwise hide)
 
-### Module C — Pickup State Machine + Rendezvous Cues
+### Module C - Pickup State Machine + Rendezvous Cues
 **What:** Make arrival explicit and symmetric:
 - Rider: “Your driver is at *[entrance/landmark]*” card with car + plate + live position + walking cue
 - Driver: “Waiting at *[spot]*” status with timer and guidance
@@ -148,12 +150,12 @@ A feature bundle that upgrades pickup coordination with three modules, behind fl
 ## 8) MVP scope (v3 = shipping plan)
 ### 8.1 MVP = ship now
 1. **Eligibility + difficulty scoring v0** (rules-first; model optional)
-2. **Module A — minimal guided pickup flow**
+2. **Module A - minimal guided pickup flow**
    - entrance/gate selection (only where POI template supports it)
    - 1‑tap note templates
    - skip path
-3. **Module B — difficulty cue + message templates** (no best stop by default)
-4. **Module C — arrival card + 1‑tap confirmations**
+3. **Module B - difficulty cue + message templates** (no best stop by default)
+4. **Module C - arrival card + 1‑tap confirmations**
 5. **Instrumentation + experiment framework** (eligible-only A/B)
 
 ### 8.2 Not in MVP (later)
@@ -166,7 +168,7 @@ A feature bundle that upgrades pickup coordination with three modules, behind fl
 ## 9) End-to-end user journeys (v3)
 These journeys define the exact surfaces and state transitions we’ll design/build.
 
-### Journey 1 — Hard pickup, rider completes guided flow
+### Journey 1 - Hard pickup, rider completes guided flow
 1. Rider enters pickup + destination → system computes eligibility
 2. If eligible → Module A shown (≤2 screens)
    - Rider selects entrance: “North Gate”
@@ -178,17 +180,17 @@ These journeys define the exact surfaces and state transitions we’ll design/bu
    - Rider taps “I’m coming out now”
 6. Driver sees rider confirmation; trip starts
 
-### Journey 2 — Hard pickup, rider skips guided flow
+### Journey 2 - Hard pickup, rider skips guided flow
 1. Eligible → Module A shown → Rider taps “Looks good”
 2. Match occurs
 3. Driver sees difficulty cue + generic template: “I’m at the pickup point shown in app.”
 4. Module C still shows rendezvous card with baseline pickup string
 
-### Journey 3 — Easy pickup, no intervention
+### Journey 3 - Easy pickup, no intervention
 1. Not eligible → baseline UX only
 2. No exposure flags set
 
-### Journey 4 — Rider moves pin after match
+### Journey 4 - Rider moves pin after match
 1. Rider edits pickup after match
 2. Recompute difficulty + refresh rendezvous string
 3. Notify driver with non-spammy banner (“Pickup updated: North Gate”) + quick acknowledge
@@ -283,7 +285,7 @@ Hard requirement: **no dependency on fragile services** at booking time; on time
    - No prompts that encourage oversharing (“exact outfit”, “phone number”).
    - Avoid instructions that suggest unsafe crossing/standing.
 
-### 13.2 Module A — Rider guided pickup
+### 13.2 Module A - Rider guided pickup
 **Requirements**
 - Pre-confirm micro-step only for eligible rides:
   - content fits in ≤2 screens
@@ -301,7 +303,7 @@ Hard requirement: **no dependency on fragile services** at booking time; on time
 - Rider changes pickup after match: re-run eligibility and refresh rendezvous string
 - Accessibility: voice-over friendly; avoid map-only instructions
 
-### 13.3 Module B — Driver cues
+### 13.3 Module B - Driver cues
 **Requirements**
 - Cue is informative, not alarming.
 - Suggested templates:
@@ -315,7 +317,7 @@ Hard requirement: **no dependency on fragile services** at booking time; on time
 - Driver cancels due to “can’t find rider / hard pickup” reason codes decrease.
 - No more than one additional tap target on arrival screen.
 
-### 13.4 Module C — Rendezvous cues
+### 13.4 Module C - Rendezvous cues
 **Requirements**
 - Rider card must show:
   - car + plate + “where to meet” string
@@ -359,19 +361,19 @@ Hard requirement: **no dependency on fragile services** at booking time; on time
 ---
 
 ## 15) Experiment plan (v3)
-### Phase 0 — Offline validation (1–2 weeks)
+### Phase 0 - Offline validation (1–2 weeks)
 - Backtest scoring against proxies:
   - pin edits after match
   - call/chat during pickup window
   - arrive→start p90
   - cancel reason codes
 
-### Phase 1 — Limited geo A/B (2–4 weeks)
+### Phase 1 - Limited geo A/B (2–4 weeks)
 - Roll out to 1–2 cities + targeted POIs
 - A/B: eligible rides only
 - Success = reduction in post‑match cancels + arrive→start p90 without harming acceptance/conversion
 
-### Phase 1b — Ramp plan + stop criteria
+### Phase 1b - Ramp plan + stop criteria
 **Ramp:** 1% → 5% → 25% → 50% of eligible rides (per geo)
 
 **Stop criteria (any trigger pauses ramp):**
@@ -380,7 +382,7 @@ Hard requirement: **no dependency on fragile services** at booking time; on time
 - support contact rate spike (pickup-related)
 - safety incident uptick in treated cohort
 
-### Phase 2 — Expand + harden (4–8 weeks)
+### Phase 2 - Expand + harden (4–8 weeks)
 - Add POI templates (airports/events as separate tracks)
 - Tune thresholds to minimize unnecessary prompts
 
