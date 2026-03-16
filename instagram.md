@@ -1,7 +1,7 @@
 <p align="center">
   <img 
-    src="https://raw.githubusercontent.com/004mayank/product-teardowns/main/images/whatsapp.png" 
-    alt="Whatsapp" 
+    src="https://raw.githubusercontent.com/004mayank/product-teardowns/main/images/Instagram.png" 
+    alt="Instagram Logo" 
     width="200"
   />
 </p>
