@@ -46,6 +46,7 @@ reason about, and communicate product decisions.
 
 ## PRDs
 
+- **Google Search - AI Answers (Grounded) Without Breaking the Web**
 - **Zomato - Reduce Checkout Abandonment**
 - **Whatsapp - Messaging**
 - **Slack - Messaging**
