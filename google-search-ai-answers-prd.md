@@ -1,9 +1,9 @@
-# PRD v1: Google Search — AI Answers (Grounded) Without Breaking the Web
+# PRD v2: Google Search — AI Answers (Grounded) Without Breaking the Web
 
 **Product area:** Google Search (SERP + ranking + ads + publisher ecosystem)  
 **Author:** Mayank Malviya  
-**Date:** 18 Mar 2026  
-**Status:** v1 (draft)  
+**Date:** 21 Mar 2026  
+**Status:** v2 (draft)  
 
 **Related teardown:**
 - Google Search with AI teardown (v3): https://github.com/004mayank/product-teardowns/blob/main/google-search-with-ai-teardown.md
@@ -11,234 +11,270 @@
 ---
 
 ## 0) Executive summary
-Google Search is evolving from a “rank documents” product into a **universal intent router** that can also produce **grounded, cited answers**.
+Google Search is shifting from “rank documents” to a **universal intent router** that can also produce **grounded, cited answers**.
 
-This PRD proposes a v1 of **AI Answers** (an AI block on the SERP) that:
-- improves **user success** on informational queries (fewer reformulations, faster task completion)
-- preserves **trust** via grounding + citations + safe fallbacks
-- minimizes **ecosystem harm** by designing for *qualified* outbound traffic and source diversity
-- protects **ads integrity** by keeping a hard trust boundary between ads and AI answers
+This PRD defines v2 of **AI Answers** (an AI block on the SERP) designed to:
+- improve **user success** on eligible informational intents (fewer reformulations, faster completion)
+- preserve **trust** via grounding, citations, freshness handling, and conservative fallbacks
+- preserve **web health** by making citations drive **qualified** publisher traffic (not decorative links)
+- preserve **ads integrity** by keeping a hard trust boundary between ads and AI output
 
-The core product decision is a policy engine that chooses: **Answer vs Ask vs Route vs Links-only**, based on intent and risk.
+**Core product decision:** A policy engine chooses per-query: **Answer vs Ask vs Route vs Links-only** based on intent, risk, freshness sensitivity, and “web impact” constraints.
 
 ---
 
 ## 1) Problem statement
 ### 1.1 User problem
-For many informational and multi-step queries, traditional search requires users to:
-- open multiple links
-- synthesize conflicting information
-- translate content into an action plan
+For many informational and multi-step queries, classic search requires:
+- opening multiple links
+- synthesizing conflicting information
+- translating content into a plan
 
 This is high effort, especially on mobile.
 
 ### 1.2 Ecosystem problem (hard constraint)
-If AI answers satisfy intent without sending meaningful value back to publishers, the open-web supply of high-quality content degrades over time, which ultimately harms search quality.
+If AI answers satisfy intent without returning meaningful value to publishers, the open web’s incentive to produce high-quality content degrades—eventually harming search quality.
 
 ### 1.3 Trust problem
-AI answers introduce new failure modes:
+AI answers introduce failure modes:
 - confident wrong answers
-- citation mismatches
-- freshness failures (breaking news)
+- citation mismatch (citations don’t support the claim)
+- freshness failures (stale info in fast-changing topics)
 
-A few high-profile errors can erode the Search trust moat.
+A small number of high-profile incidents can damage Search’s trust moat.
 
 ---
 
 ## 2) Goals and non-goals
-### 2.1 Goals (v1)
-**G1 — User success:** Reduce query effort for low/medium-risk informational intents.
-- Target: meaningfully lower reformulation rate and time-to-satisfaction on eligible queries.
+### 2.1 Goals (v2)
+**G1 — User success**
+- Reduce reformulation rate and time-to-satisfaction on eligible queries.
 
-**G2 — Trust and safety:** Ship with strong guardrails.
-- Target: keep critical error rate below a strict threshold; prefer safe fallbacks.
+**G2 — Trust and safety**
+- Keep critical error rate below strict threshold; prefer safe fallbacks.
 
-**G3 — Healthy web exchange (minimum viable):** Ensure citations drive *qualified* outbound traffic.
-- Target: citations are visible, claim-anchored where possible, and diverse.
+**G3 — Healthy web exchange (minimum viable)**
+- Ensure citations create **qualified** outbound traffic and preserve source diversity.
 
-**G4 — Monetization integrity:** Preserve ad trust boundaries.
-- Target: ads remain clearly labeled; AI answer content is not sponsored.
+**G4 — Monetization integrity**
+- Preserve ad trust boundaries and commercial intent capture via routing.
 
-### 2.2 Non-goals (v1)
-- Replacing the entire SERP with chat (this is not “AI-only search”).
-- Solving all query classes (e.g., medical/legal/finance; real-time breaking news).
-- Publisher compensation mechanisms (licensing/revenue share) — may be explored later, but not required for v1 launch.
+### 2.2 Non-goals (v2)
+- “Chat-only SERP” or replacing classic ranking universally.
+- Solving regulated advice (medical/legal/finance) beyond narrowly-scoped definitional content.
+- Publisher compensation programs (licensing/revenue share) as launch requirement.
 
 ---
 
 ## 3) Scope
 ### 3.1 In scope
-- SERP AI Answer block for **eligible** queries
-- Eligibility policy engine (intent + risk)
-- Grounded answer generation with citations
-- Follow-up suggestions that **preserve original intent**
+- AI Answer block for **eligible** queries
+- Eligibility policy engine (intent + risk + freshness + web-impact)
+- Retrieval-grounded generation with citations
+- Follow-ups that preserve original intent
 - Safe fallbacks (links-first, vertical modules)
 - Instrumentation + evaluation pipeline
 
-### 3.2 Out of scope (initially)
-- Personalized answers using private user data
-- Long conversational sessions across many intents
-- Direct transactions (checkout) inside AI answer
+### 3.2 Out of scope (initial)
+- Personal answers using private user data
+- Long multi-turn conversations across intents
+- In-answer checkout/transactions
 
 ---
 
 ## 4) Users and primary use cases
 ### 4.1 Personas
-- **Everyday learner:** wants a clear explanation with sources (low patience)
-- **Decision maker:** wants comparison + trade-offs (high consideration)
-- **Time-sensitive seeker:** asks about news/events (high freshness sensitivity)
+- **Everyday learner:** wants a clear explanation with sources
+- **Decision maker:** wants comparisons and trade-offs
+- **Task completer:** wants a step-by-step plan
+- **Time-sensitive seeker:** wants up-to-date info
 
-### 4.2 Primary use cases (v1)
+### 4.2 Primary use cases (eligible)
 - “How do I…?” multi-step guidance (generic)
-- Concept explanations (“what is…”, “why does…”) with citations
+- Concept explanations (“what is…”, “why…”) with citations
 - Comparisons (“X vs Y”) for non-regulated topics
+- “Best practices” queries where sources converge
 
-### 4.3 Explicitly excluded use cases (v1)
-- Medical/legal/finance advice (unless purely definitional and heavily constrained)
-- Breaking news answers where freshness can’t be guaranteed
+### 4.3 Excluded (default)
+- Medical/legal/finance advice
+- Breaking news synthesis (default to sources-first)
+- Highly personalized recommendations without explicit user context
 
 ---
 
 ## 5) Product principles
-1) **Answer when it helps, cite when it matters, route when intent is vertical.**
-2) **Trust > cleverness.** Prefer “sources-first” over speculative answers.
-3) **Design for the web to survive.** Citations are not decorative.
-4) **Make uncertainty legible.** Timestamp, qualifiers, and fallbacks.
+1) **Answer when it helps; route when intent is vertical; ask when ambiguous; fallback when risky.**
+2) **Trust > cleverness.** Prefer sources-first over speculative synthesis.
+3) **Design for the web to survive.** Citations must create real publisher value.
+4) **Make uncertainty legible.** Timestamp, qualifiers, and conservative language.
 5) **Ads integrity is sacred.** Never blur boundaries.
 
 ---
 
-## 6) Proposed solution (v1)
-### 6.1 Eligibility decision: Answer | Ask | Route | Links
-For each query, the system predicts:
+## 6) Proposed solution (v2)
+
+### 6.1 Eligibility decision: Answer | Ask | Route | Links-only
+For each query, predict:
 - intent bucket: Know / Do / Go / Buy
 - risk class: low / medium / high
 - freshness sensitivity: evergreen / periodic / breaking
+- answerability: confidence that retrieved sources support a stable synthesis
+- ecosystem impact: likelihood AI block suppresses qualified outbound clicks
 
 **Policy outcomes:**
 - **Answer:** show AI block with grounded response + citations
-- **Ask:** show clarifying question (when query is underspecified and branching)
-- **Route:** show vertical-first (Maps/Shopping/News), AI assistive summary optional
-- **Links-only:** no AI answer; show classic SERP and/or modules
+- **Ask:** show clarifying question when query branches materially
+- **Route:** show vertical-first (Maps/Shopping/News); AI can assist but not be terminal
+- **Links-only:** classic SERP (and modules) without AI synthesis
 
-**v1 policy defaults (conservative):**
-- Answer: low/medium-risk Know queries with multi-source retrieval
-- Ask: ambiguous “best X” informational queries
-- Route: Buy and Go intents (AI assistive, not terminal)
-- Links-only: high-risk domains + breaking topics
+**v2 default posture (conservative):**
+- Answer: low/medium-risk Know/Do queries with strong retrieval diversity and support
+- Ask: ambiguous “best X” / “should I” with branching user constraints
+- Route: Buy and Go intents; AI summarizes options, pushes actions to vertical modules
+- Links-only: high-risk domains + breaking topics + low-support retrieval
 
-### 6.2 AI Answer block UX
-**Core components:**
+### 6.2 AI Answer block UX (requirements)
+**Above the fold:**
 - 3–6 bullet summary (scannable)
-- expandable sections (steps, definitions, pros/cons)
-- visible citations (minimum set; ideally claim-anchored)
-- “As of <time>” for periodic content
-- follow-up suggestions that maintain intent (“Compare options”, “Show sources”, “See more results”)
+- 2–5 primary citations visible immediately
+- “Explore sources” affordance (explicit, not hidden)
 
-**Key UX constraint:** AI block must not become a dead-end.
-- add an explicit “Explore sources” affordance
-- surface 2–5 primary citations above the fold
+**Expandable sections:**
+- steps / checklist (for Do intents)
+- definitions and key points
+- pros/cons (for comparisons)
 
-### 6.3 Retrieval and grounding (product requirements)
-- Retrieval must return a **diverse** set of candidate sources
-- Generation must be **grounded** (constrained to retrieved text)
-- Citations must be **correct** (support the claim)
-- If grounding/citations fail thresholds → fallback to links-only
+**Trust affordances:**
+- “As of <time>” for periodic topics
+- citations are section-anchored at minimum; claim-anchored where feasible
+- “Report an issue” with categories: wrong / outdated / unsafe / missing sources
+
+**Non-dead-end constraint:**
+- AI block must not become a terminal experience by default.
+- Always provide a clear path to sources and classic results.
+
+### 6.3 Retrieval + grounding
+**Retrieval requirements:**
+- minimum source count (N) and minimum domain diversity (D)
+- source quality thresholds (spam / thin content / AI-generated SEO pages)
+- allow multiple perspectives on contested topics (or fallback)
+
+**Grounding requirements:**
+- generation is constrained to retrieved content
+- citations must support the associated section/claim
+- if citation correctness below threshold → fallback to links-only
 
 ### 6.4 Freshness handling
-- Evergreen: allow caching (short TTL) for cost/latency
-- Periodic: require timestamped sources + show “as of”
-- Breaking: default to sources-first (News module), no synthesized answer unless high-confidence constraints met
+- **Evergreen:** allow caching (short TTL) for cost/latency
+- **Periodic:** require timestamped sources; show “as of”
+- **Breaking:** default to sources-first modules; synthesis only under very strict constraints
 
-### 6.5 Ads and monetization integration
-- Ads are rendered as usual with clear labels
+### 6.5 Ads + monetization integrity
+- Ads rendered as usual with clear labels
 - AI answer must not incorporate sponsored content as “facts”
-- For Buy queries: route to Shopping/merchant modules; AI can summarize options but must encourage comparison actions
+- Commercial intents route to Shopping/merchant modules; AI can summarize but must encourage comparison actions
 
 ---
 
 ## 7) Success metrics and guardrails
-### 7.1 User success (utility)
-- **Reformulation rate** on eligible queries
-- **Time-to-satisfying-action** (click, save, call, navigate, long dwell)
-- **Query success proxy** (session ends without back-to-SERP pogo-sticking)
+
+### 7.1 User success
+- Reformulation rate (eligible queries)
+- Time-to-satisfying-action (click/dwell/save/call/navigate)
+- Session success proxy (reduced pogo-sticking)
 
 ### 7.2 Trust + safety
-- **Critical error rate** (high severity factual/safety failures per 10k)
-- **Citation correctness rate** (human + automated checks)
-- **Freshness incidents** (breaking topics answered incorrectly/stale)
+- Critical error rate (severity-weighted) per 10k
+- Citation correctness rate (human + automated)
+- Freshness incidents (stale/incorrect on periodic/breaking)
 
-### 7.3 Publisher ecosystem health
-- **Qualified outbound traffic from citations** (engaged visits, not just clicks)
-- **Citation diversity index** (domain concentration)
-- **Publisher complaint rate** / escalation volume
+### 7.3 Publisher ecosystem health (v2 adds explicit thresholds)
+- Qualified outbound traffic from citations:
+  - long click rate
+  - downstream engagement (scroll depth / time)
+  - “return-to-SERP quickly” penalty
+- Citation diversity index (domain concentration)
+- Publisher complaint rate / escalation volume
+
+**Guardrail:** If qualified outbound traffic drops below threshold for a query cluster, tighten eligibility (Links-only) and/or adjust citations UX.
 
 ### 7.4 Revenue integrity
-- **Commercial intent capture** (Buy queries reaching shopping actions)
-- **Ad trust metrics** (misclicks/complaints; ad-label recognition surveys)
+- Buy-intent capture into shopping actions
+- Ad trust metrics (complaints, misclicks, surveys)
 
 ---
 
-## 8) Requirements (functional)
-### 8.1 Eligibility + routing
-- Must classify intent + risk + freshness
-- Must support category-level kill switches
-- Must support query-cluster exclusions
+## 8) Functional requirements
 
-### 8.2 Answer generation + citations
-- Must produce answers only when minimum retrieval constraints met
-- Must attach citations to major claims (or at least sections)
-- Must support “Show sources” UI
+### 8.1 Policy engine
+- classify intent + risk + freshness
+- answerability score from retrieval support
+- ecosystem impact score (predict click suppression)
+- category-level kill switches
+- query-cluster exclusions and rapid rollback
 
-### 8.3 Logging and feedback
-- Must log: query class, eligibility decision, sources retrieved, citations shown, user actions
-- Must provide user feedback: “wrong”, “outdated”, “unsafe”, “missing sources”
+### 8.2 AI answer generation
+- strict JSON output internally
+- structured answer sections
+- citations: minimum above-the-fold citations + section anchoring
+- fallback when:
+  - retrieval diversity insufficient
+  - citation correctness checks fail
+  - domain is high-risk
+
+### 8.3 Observability + feedback
+- log decision: Answer/Ask/Route/Links-only and key factors
+- log sources retrieved and citations displayed
+- log user actions: expand, click citations, return to SERP
+- user feedback: wrong/outdated/unsafe/missing sources
 
 ---
 
-## 9) Requirements (non-functional)
-- **Latency:** AI block should not materially degrade perceived SERP load; use streaming and/or progressive render
-- **Reliability:** graceful degradation to classic SERP
-- **Cost controls:** caching + eligibility constraints; measure $/satisfied-session
-- **Abuse resistance:** detect AI-targeted SEO spam; maintain source quality thresholds
+## 9) Non-functional requirements
+- Latency: AI block must not materially degrade perceived SERP load (progressive render)
+- Reliability: degrade gracefully to classic SERP
+- Cost controls: caching + eligibility constraints; track $/satisfied-session
+- Abuse resistance: detect AI-targeted SEO spam; maintain source quality thresholds
 
 ---
 
 ## 10) Rollout plan
-### Phase 0: internal + dogfood
+
+### Phase 0 — internal + dogfood
 - restricted query sets
-- heavy human review and rapid rollback
+- heavy human review
+- rapid kill switches
 
-### Phase 1: public, low-risk
-- low/medium-risk Know queries only
-- geo/language limited (start with English)
-- strict safety fallback
+### Phase 1 — public (low-risk)
+- low/medium-risk Know queries
+- limited geo/language (English first)
+- strict fallbacks
 
-### Phase 2: expand carefully
-- broaden query coverage
+### Phase 2 — expand carefully
+- broaden eligible intents (some Do)
 - introduce clarifying questions for ambiguous queries
-- iterate citations UX to improve qualified clicks
+- iterate citations UX to increase qualified clicks
 
 ---
 
 ## 11) Risks and mitigations
-- **Hallucinations / incorrect synthesis** → strict grounding thresholds + links-only fallback
-- **Citation mismatch** → claim-anchoring + automated checks + human eval
-- **Publisher backlash** → design citations for qualified clicks; monitor ecosystem scorecard
-- **Regulatory scrutiny** → transparent labeling, uncertainty communication, audit logs
-- **Ads trust erosion** → strict separation; never blend sponsored content into AI response
+- Hallucinations → grounding thresholds + links-only fallback
+- Citation mismatch → claim/section anchoring + automated checks + eval
+- Publisher backlash → qualified click guardrails + diversity requirements
+- Regulatory scrutiny → transparency, uncertainty communication, audit logs
+- Ads trust erosion → strict separation; no sponsored blending
 
 ---
 
 ## 12) Open questions
-- What is the minimal acceptable **publisher value exchange** for v1 (qualified clicks threshold)?
-- How should we display **uncertainty** without confusing users?
-- What’s the best UX for **multiple perspectives** on contested topics?
-- Where should we draw the line on **breaking news** — ever answer, or always sources-first?
+- Minimal acceptable publisher value exchange for v2 (qualified click threshold)
+- Best UX for uncertainty without confusing users
+- Multiple perspectives UX for contested topics
+- Breaking news line: ever synthesize, or always sources-first?
 
 ---
 
-## 13) Appendix: v1 launch checklist
+## 13) Appendix: v2 launch checklist
 - [ ] Eligibility policy doc + approved risk taxonomy
 - [ ] Citation correctness evaluation harness
 - [ ] Breaking-news detection + hard fallback
