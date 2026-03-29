@@ -10,7 +10,7 @@
 
 **Product:** GitHub (Pull Requests / Code Review)
 **Author:** Mayank Malviya
-**Status:** v2 - scoped MVP
+**Status:** v3 - routing + capacity + team queue
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/github-teardown.md
 
 ---
@@ -28,11 +28,12 @@ When review routing fails, teams pay in:
 - reviewer burnout (everything feels urgent),
 - lower trust in the system (“merges are random”).
 
-This PRD proposes an MVP that makes GitHub a better **attention router for code review** by combining:
+This PRD proposes a v3 that makes GitHub a better **attention router for code review** by combining:
 1) a **Review Inbox** that behaves like a real queue,
 2) **explainable routing** (“why you were requested”),
-3) **load-aware suggestions** for authors,
-4) an explicit, rate-limited **unblock** mechanism.
+3) **capacity-aware + load-aware routing** (suggestions + optional auto-routing),
+4) an explicit, rate-limited **unblock** escalation ladder,
+5) a minimal **Team Review Queue** for accountability and SLAs.
 
 ---
 
@@ -119,7 +120,18 @@ GitHub review breaks in predictable ways:
 
 ---
 
-## 5) Proposed solution (v2)
+## 5) Proposed solution (v3)
+
+v3 keeps the v2 MVP surfaces, but upgrades GitHub from “show my requests” to a real **routing + capacity system**:
+- **Capacity-aware**: reviewers can signal availability and GitHub can respect it.
+- **Auto-routing (with guardrails)**: GitHub can request the *right* people by default, not just suggest them.
+- **Team-level accountability**: teams get a queue + SLAs, not just individuals.
+
+### 5.0 Principles (what makes it trustworthy)
+1) **Explainable by default**: every request has a reason.
+2) **Never violate governance**: branch rules/CODEOWNERS are hard constraints.
+3) **Respect capacity**: route work to available reviewers; reduce interrupts.
+4) **Safe escalation**: unblock exists, but is rate-limited and policy-controlled.
 
 ### 5.1 Review Inbox (personal) — a prioritized queue
 #### Placement
@@ -134,38 +146,43 @@ Each PR row shows:
 - size bucket: S/M/L (simple heuristic)
 - age since request
 - **why it’s here** (see 5.2)
-- “blocking” badge if the PR is explicitly blocked on the reviewer (see 5.4)
+- **capacity context** (e.g., “routed to you: low load”) where appropriate
+- “blocking” badge if the PR is explicitly blocked on the reviewer (see 5.5)
 
 #### Default sections (ranked)
 1) **Blocking me**
 - I’m required and not yet reviewed, OR
 - author triggered “Unblock” targeting me/team
 
-2) **High risk / high impact**
+2) **Due soon (team SLA)**
+- items approaching a configured SLA (e.g., 8h/24h) for teams/orgs that opt in
+
+3) **High risk / high impact**
 - failing required checks
 - touches sensitive paths (CODEOWNERS critical paths)
 - large PRs (L) waiting > threshold
 
-3) **Follow-ups**
+4) **Follow-ups**
 - I reviewed/commented and new commits landed
 
-4) **FYI / low priority**
+5) **FYI / low priority**
 - optional requests, watch-based items
 
-#### Ranking (MVP, explainable)
+#### Ranking (v3: still explainable)
 Rank score = weighted sum of:
 - required-reviewer (highest weight)
+- SLA urgency (if configured)
 - age since request
 - check state (failing required checks boosts priority; “all green” can be lower)
 - PR size (larger boosts priority over time to avoid starvation)
 - repo priority (repo setting: normal/high)
 
-**Explicitly not in v2:** complex ML, individual performance scoring.
+**Explicitly not in v3:** opaque black-box ranking. If ML is introduced later, it must ship with explanations + guardrails.
 
 #### Key interactions
 - **Review now** → opens PR in review mode
-- **Snooze** (1h / until tomorrow) with reason prompt (optional)
-- **Not me** (routes back to author with suggested alternatives; see 5.3)
+- **Snooze** (1h / until tomorrow) with optional reason
+- **Not me** (routes back to author + offers reroute suggestions)
 - **Mark reviewed** (auto when review submitted)
 
 
@@ -174,61 +191,81 @@ Show one primary reason + optional secondary reasons:
 - “CODEOWNERS: you own `/payments/*`”
 - “Required by branch rules (team `@platform-owners`)”
 - “You changed nearby code recently”
+- “You’re on-call for `Payments` (this week)”
+- “Auto-routed: lowest load among qualified reviewers”
 - “Author requested you”
 
-Principle: reduce the feeling of randomness and teach ownership.
+Principle: reduce the feeling of randomness, and make routing auditable.
 
 
-### 5.3 Load-aware reviewer suggestions (author assist)
+### 5.3 Load-aware reviewer suggestions (author assist) → plus auto-routing
 When the author clicks **Request reviewers**:
 
 **Inputs**
 - CODEOWNERS candidates (paths touched)
+- required teams/users from branch rules
 - past reviewers for this area (recent N PRs)
 - recent activity (commits/reviews in last 30 days)
+- reviewer capacity signals (see 5.4)
 
 **Outputs**
 - Suggested reviewers with:
-  - “Match reason” (owner/recent)
-  - **Load indicator**: Low/Med/High
+  - “Match reason” (owner/recent/on-call)
+  - **Load indicator**: Low/Med/High (bucketed)
+  - “Expected response” bucket (Fast/Normal/Slow) derived from rolling medians (also bucketed)
 
-**Load indicator (v2 heuristic)**
-- open review requests assigned to the reviewer (rolling)
-- median time-to-first-review for that reviewer (rolling)
+**Auto-routing (opt-in)**
+- For repos/orgs that enable it, GitHub can **auto-request** 1–2 reviewers that satisfy constraints.
+- Authors can override, but overrides are captured as a signal (“I chose X instead of suggestion Y”).
 
 **Important constraints**
 - Load is bucketed (no exact numbers) to reduce social pressure.
-- If branch rules require a specific team/owner, suggestions cannot violate required constraints.
+- Auto-routing cannot remove required reviewers; it only fills the “requested” slots.
 
 
-### 5.4 “Unblock” (safe escalation)
+### 5.4 Reviewer capacity signals (new in v3)
+Give reviewers lightweight, explicit control over routing:
+- **Availability**: Available / Focus mode / Away (OOO)
+- **Max queue**: soft cap on open review requests (e.g., 5)
+- **Working hours** (optional): local-time window to avoid night pings
+
+**How GitHub uses this**
+- Avoid routing new optional requests to “Away” reviewers.
+- Prefer “Available” + low-load reviewers for auto-routing.
+- If only required owners are available, keep governance and show “capacity constrained” to the author.
+
+
+### 5.5 “Unblock” (safe escalation) → escalation ladder
 Add a first-class escalation action for authors:
 
 **Trigger**
-- PR has waited > X hours since review request (default 4h; configurable by org/repo)
+- PR has waited > X hours since review request (default 4h; configurable)
 
 **Action**
 - Author clicks **Unblock review**
 - Select scope:
-  - “Unblock this PR” (pings requested reviewers)
-  - “Escalate to team lead” (if configured)
+  1) “Unblock this PR” (targets currently requested reviewers)
+  2) “Reroute to next-best reviewers” (if enabled and constraints allow)
+  3) “Escalate to team lead/on-call” (if configured)
 
 **Guardrails**
 - rate-limited per author (e.g., 3/day)
 - cooldown per PR (e.g., once per 6h)
-- org policy can disable
+- org policy can disable or restrict to required-review PRs only
 
 **Effect**
 - PR gets a “Blocking” badge in Review Inbox for targeted reviewers
-- optional: one additional notification (digest-friendly)
+- one additional notification (digest-friendly)
+- optional: auto-create a team-queue item if a team SLA is enabled
 
 
-### 5.5 Team-level view (optional, but high leverage)
-If we ship one team surface in v2, ship a minimal **Team Review Queue**:
+### 5.6 Team Review Queue (v3: ship, not optional)
+A minimal **Team Review Queue** for teams configured in branch rules/CODEOWNERS:
 - shows PRs waiting on the team’s required reviewers
-- highlights aging items and load hotspots
+- highlights aging items, SLA breaches, and capacity constraints
+- supports assignment suggestions (not mandates) for team triage
 
-(If this is too much scope, keep as v2.1.)
+This is the missing layer that turns review from a personal notification problem into a team flow system.
 
 ---
 
