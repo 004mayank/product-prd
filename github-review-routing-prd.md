@@ -120,7 +120,7 @@ GitHub review breaks in predictable ways:
 
 ---
 
-## 5) Proposed solution (v3)
+## 5) Proposed solution 
 
 v3 keeps the v2 MVP surfaces, but upgrades GitHub from “show my requests” to a real **routing + capacity system**:
 - **Capacity-aware**: reviewers can signal availability and GitHub can respect it.
