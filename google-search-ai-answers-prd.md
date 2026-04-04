@@ -1,19 +1,19 @@
-# PRD v3: Google Search — AI Answers (Grounded) Without Breaking the Web
+# PRD: Google Search - AI Answers (Grounded) Without Breaking the Web
 
 **Product area:** Google Search (SERP + ranking + ads + publisher ecosystem)
 **Author:** Mayank Malviya
 **Date:** 22 Mar 2026
-**Status:** v3 (draft)
+**Status:** Final
 
 **Related teardown:**
-- Google Search with AI teardown (v3): https://github.com/004mayank/product-teardowns/blob/main/google-search-with-ai-teardown.md
+- Google Search with AI teardown : https://github.com/004mayank/product-teardowns/blob/main/google-search-with-ai-teardown.md
 
 ---
 
 ## 0) Executive summary
 Google Search is shifting from “rank documents” to a **universal intent router** that can also produce **grounded, cited answers**.
 
-This PRD defines v3 of **AI Answers** (an AI block on the SERP) designed to:
+This PRD defines **AI Answers** (an AI block on the SERP) designed to:
 - improve **user success** on eligible informational intents (fewer reformulations, faster completion)
 - preserve **trust** via grounding, citation correctness, freshness handling, and conservative fallbacks
 - preserve **web health** by making citations drive **qualified** publisher value (not decorative links)
@@ -36,7 +36,7 @@ For many informational and multi-step queries, classic search requires:
 This is high effort, especially on mobile.
 
 ### 1.2 Ecosystem problem (hard constraint)
-If AI answers satisfy intent without returning meaningful value to publishers, the open web’s incentive to produce high-quality content degrades—eventually harming search quality.
+If AI answers satisfy intent without returning meaningful value to publishers, the open web’s incentive to produce high-quality content degrades-eventually harming search quality.
 
 ### 1.3 Trust problem
 AI answers introduce failure modes:
@@ -49,20 +49,20 @@ A small number of high-profile incidents can damage Search’s trust moat.
 ---
 
 ## 2) Goals and non-goals
-### 2.1 Goals (v3)
-**G1 — User success**
+### 2.1 Goals 
+**G1 - User success**
 - Reduce reformulation rate and time-to-satisfaction on eligible queries.
 
-**G2 — Trust and safety**
+**G2 - Trust and safety**
 - Keep critical error rate below strict threshold; prefer safe fallbacks.
 
-**G3 — Healthy web exchange (explicit value exchange)**
+**G3 - Healthy web exchange (explicit value exchange)**
 - Ensure AI Answers produce **measurable qualified publisher value** (not just raw clicks).
 
-**G4 — Monetization integrity**
+**G4 - Monetization integrity**
 - Preserve ad trust boundaries and commercial intent capture via routing.
 
-### 2.2 Non-goals (v3)
+### 2.2 Non-goals 
 - “Chat-only SERP” or replacing classic ranking universally.
 - Solving regulated advice (medical/legal/finance) beyond narrowly-scoped definitional content.
 - Publisher licensing/revenue share as a launch requirement.
@@ -115,7 +115,7 @@ A small number of high-profile incidents can damage Search’s trust moat.
 
 ---
 
-## 6) Proposed solution (v3)
+## 6) Proposed solution 
 
 ### 6.1 Eligibility decision: Answer | Ask | Route | Links-only
 For each query, predict:
@@ -263,17 +263,17 @@ For each query, predict:
 
 ## 10) Rollout plan
 
-### Phase 0 — internal + dogfood
+### Phase 0 - internal + dogfood
 - restricted query sets
 - heavy human review
 - rapid kill switches
 
-### Phase 1 — public (low-risk)
+### Phase 1 - public (low-risk)
 - low/medium-risk Know queries
 - limited geo/language (English first)
 - strict fallbacks
 
-### Phase 2 — expand carefully
+### Phase 2 - expand carefully
 - broaden eligible intents (some Do)
 - introduce clarifying questions for ambiguous queries
 - iterate source-first UX to increase qualified publisher value
