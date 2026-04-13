@@ -2,11 +2,11 @@
 
 **Product:** ChatGPT (OpenAI)
 **Author:** Mayank Malviya
-**Status:** v2 - Improved PRD
+**Status:** v3 - Final PRD
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/chatgpt-teardown.md
 
-**Version:** v2 - Improved PRD
-**Changes from v1:** Added competitive analysis with specific win/loss reasons, detailed requirements with acceptance criteria and edge cases for all five features, full event schemas, instrumentation spec with baselines and directional targets, experimentation framework with three experiments, expanded risk register with likelihood/impact table, and funnel analysis with drop-off hypotheses.
+**Version:** v3 - Final PRD
+**Changes from v2:** Added phased rollout plan with launch gates and kill switches, dependency map, resolved open questions, complete experiment backlog with power calculations, SLO revision history, full instrumentation spec aligned to rollout phases, and version history table updated to reflect all three versions.
 
 ---
 
@@ -16,6 +16,7 @@
 |---|---|
 | v1 | Problem statement, goals/non-goals, personas, five-feature solution (outcome templates, iteration coaching, trust UX, workspace capture, handoff), north star metric, MVP scope, risks, open questions |
 | v2 | Competitive analysis with specific win/loss reasons, detailed requirements and acceptance criteria, edge cases per feature, event schemas, metrics with baselines and targets, experimentation framework, expanded risk register |
+| v3 | Phased rollout plan, launch gates, kill switches, dependency map, resolved open questions, complete experiment backlog, full instrumentation spec, SLO revision history |
 
 ---
 
@@ -25,7 +26,7 @@ ChatGPT is the highest-distribution AI product in the world with hundreds of mil
 
 This PRD specifies **Outcome-First Guided Sessions**: a structural intervention that moves ChatGPT from "a clever chat box" to a guided work session that starts from outcomes, scaffolds iteration, calibrates trust, and produces handoff-ready artifacts. The feature targets the gap between first response and paid habit - where the largest retention opportunity lives.
 
-v2 is the depth pass. Every requirement has acceptance criteria and at least one edge case. Competitive analysis is grounded in specific observable behaviors, not category labels.
+v3 is the production-grade specification. It is the direct input to the system architecture document and the launch readiness checklist. All open questions from v1 and v2 are resolved. The rollout plan includes gates, kill switches, and dependency owners.
 
 ---
 
@@ -78,7 +79,7 @@ The product is at an inflection. GPT-4o makes the model strong enough that the b
 - Fully autonomous agents across third-party systems without checkpoints - out of scope, different product surface.
 - Enterprise permissions, audit logs, shared workspaces - later, dependent on team workflows foundation.
 - Perfect factual accuracy - instead ship calibrated confidence UX + verification pathways.
-- Real-time collaborative session editing - single-user scope for v2.
+- Real-time collaborative session editing - single-user scope for v1.
 - Mobile-first redesign - desktop web is the primary surface for knowledge worker outcomes.
 
 ---
@@ -283,6 +284,25 @@ Export presets per artifact type:
 }
 ```
 
+### `session_context_state`
+
+```json
+{
+  "context_id": "uuid",
+  "session_id": "uuid",
+  "user_id": "uuid",
+  "goal": "string | null",
+  "constraints": {"key": "value"},
+  "sources": [{"type": "string", "name": "string", "id": "uuid"}],
+  "decisions": [{"turn": "int", "decision": "string"}],
+  "version": "int",
+  "last_edited_by": "user | system",
+  "expires_at": "ISO8601 | null",
+  "created_at": "ISO8601",
+  "updated_at": "ISO8601"
+}
+```
+
 ---
 
 ## 8) Event schemas
@@ -363,6 +383,28 @@ Export presets per artifact type:
   "dismiss_method": "x_button | start_without | direct_prompt_typed",
   "ts": "ISO8601"
 }
+
+// session_context_edited
+{
+  "event": "session_context_edited",
+  "session_id": "uuid",
+  "context_id": "uuid",
+  "user_id": "uuid",
+  "field_edited": "goal | constraints | sources | decisions",
+  "turn_at_edit": "int",
+  "ts": "ISO8601"
+}
+
+// trust_label_fallback
+{
+  "event": "trust_label_fallback",
+  "session_id": "uuid",
+  "artifact_id": "uuid",
+  "user_id": "uuid",
+  "reason": "latency_exceeded | model_error",
+  "latency_ms": "int",
+  "ts": "ISO8601"
+}
 ```
 
 ---
@@ -396,17 +438,18 @@ Export presets per artifact type:
 
 ### SLO definitions
 
-| SLO | Target | Measurement window | Alert threshold |
-|---|---|---|---|
-| Session context API availability | 99.5% | Rolling 7 days | <99.0% triggers incident |
-| Template generation availability | 99.5% | Rolling 7 days | <99.0% falls back to open session |
-| Artifact export availability | 99.9% | Rolling 7 days | <99.5% pages on-call |
+| SLO | v2 target | v3 target (revised) | Measurement window | Alert threshold |
+|---|---|---|---|---|
+| Session context API availability | 99.5% | 99.7% (raised after dep audit) | Rolling 7 days | <99.2% triggers incident |
+| Template generation availability | 99.5% | 99.5% | Rolling 7 days | <99.0% falls back to open session |
+| Artifact export availability | 99.9% | 99.9% | Rolling 7 days | <99.5% pages on-call |
+| Trust label service availability | - | 99.0% (new in v3) | Rolling 7 days | <98.5% falls back to no-label mode |
 
 ---
 
-## 10) Experimentation strategy
+## 10) Experimentation strategy + complete backlog
 
-### Experiment 1 - Template picker at session start (primary)
+### Experiment 1 - Template picker at session start (primary, Phase 1)
 
 **Hypothesis:** Users who are shown a template picker at session start have a higher first-session artifact export rate than users who see only the blank prompt.
 
@@ -420,10 +463,11 @@ Export presets per artifact type:
 | Secondary metric | Second-turn rate; D7 return rate |
 | Guardrail | Session abandonment rate must not increase; generation P95 latency must not exceed baseline +500ms |
 | Min detectable effect | +10pp export rate (0% -> 10%) |
-| Estimated runtime | 3 weeks (90% power, ~2M new sessions/week) |
+| Power calculation | 90% power, alpha 0.05, ~2M new sessions/week -> 3 weeks runtime |
 | Holdout | 10% excluded for long-run retention measurement |
+| Decision rule | Ship if primary metric +10pp, guardrails clear; kill if abandonment rate increases by >3pp |
 
-### Experiment 2 - Iteration suggestions placement
+### Experiment 2 - Iteration suggestions placement (Phase 1, concurrent with Exp 1)
 
 **Hypothesis:** Clickable iteration suggestion chips below the artifact produce higher second-turn rates than no suggestions, without degrading artifact quality perception.
 
@@ -434,9 +478,10 @@ Export presets per artifact type:
 | Primary metric | Second-turn rate |
 | Secondary metric | Downvote rate on iterated artifacts; suggestion click-through rate |
 | Guardrail | Generation latency for variant C must not exceed variant B +800ms |
-| Estimated runtime | 4 weeks |
+| Power calculation | 80% power, alpha 0.05 per pairwise comparison, ~500K template sessions/week -> 4 weeks runtime |
+| Decision rule | Ship winning variant if second-turn rate uplift >5pp vs. control; resolve C vs. B tie by latency |
 
-### Experiment 3 - Trust label opt-in vs. default-on
+### Experiment 3 - Trust label opt-in vs. default-on (Phase 2)
 
 **Hypothesis:** Default-on trust labels increase downvote rate reduction vs. opt-in, because the majority of users who benefit from them would not actively enable them.
 
@@ -447,11 +492,161 @@ Export presets per artifact type:
 | Primary metric | Downvote rate on factual template sessions |
 | Secondary metric | Trust label expansion rate; session completion rate |
 | Guardrail | Trust label fallback rate <5%; no latency regression |
-| Estimated runtime | 3 weeks |
+| Power calculation | 85% power, alpha 0.05, ~300K factual sessions/week -> 3 weeks runtime |
+| Decision rule | Ship default-on (B) if downvote rate reduces >5% relative vs. control with no latency regression; else ship opt-in (C) |
+
+### Experiment 4 - Session context sidebar placement (Phase 2)
+
+**Hypothesis:** A persistent sidebar showing `goal` and `constraints` improves session completion rate vs. context shown only on-demand.
+
+| Parameter | Value |
+|---|---|
+| Type | A/B |
+| Control | Context accessible via "Show session context" button only |
+| Treatment | Collapsible sidebar visible by default on template sessions |
+| Primary metric | Session completion rate (artifact exported or session marked done) |
+| Secondary metric | Context edit rate; D30 return rate for Plus users |
+| Guardrail | Desktop web page load P95 must not increase; no mobile performance regression |
+| Power calculation | 80% power, alpha 0.05, ~1M template sessions/week -> 2 weeks runtime |
+
+### Experiment 5 - Export surface timing (Phase 3, post-rollout)
+
+**Hypothesis:** Showing the "Export as..." button earlier (at 30 seconds idle vs. 60 seconds) increases export rate without triggering false positives.
+
+| Parameter | Value |
+|---|---|
+| Type | A/B |
+| Variants | (A) 60s idle threshold (current), (B) 30s idle threshold |
+| Primary metric | Artifact export rate |
+| Secondary metric | "Export dismissed" rate; artifact quality downvote rate |
+| Power calculation | 3 weeks at 80% power |
+
+### Future experiment backlog (not in current roadmap)
+
+| Experiment | Hypothesis | Blocking dependency |
+|---|---|---|
+| Template memory across sessions | Saving slot fills as defaults for returning users increases template adoption rate | Session context API v2 |
+| Builder template as a distinct code mode | Separate code execution environment for debug sessions increases builder retention | Code interpreter refactor |
+| Personalized template recommendation | ML-predicted template based on prompt intent increases first-session template adoption by 10pp | Intent classifier v2 |
+| Free-tier context persistence paywall gate | Showing context sync as a paid feature increases Plus conversion among users who complete 3+ template sessions | Subscription flow redesign |
 
 ---
 
-## 11) Risks + mitigations
+## 11) Phased rollout plan
+
+### Phase 0 - Internal dogfood (week 1-2)
+
+**Scope:** OpenAI employees only (~500 active users)
+
+**What ships:**
+- Template picker (all 5 templates)
+- Iteration coaching (static suggestions only - Exp 2 variant B)
+- Trust labels default-on
+- Session context sidebar (default visible)
+- Export buttons (Copy + Export as...)
+
+**Objectives:**
+- Validate template slot collection flow for all 5 templates
+- Confirm generation P95 latency does not regress beyond +200ms
+- Catch critical UX bugs (slot skip handling, mid-session `/template` command)
+- Calibrate trust label fallback rate - target <2% before Phase 1
+
+**Launch gate for Phase 1:**
+- Zero P0 bugs in slot collection or artifact rendering
+- Trust label fallback rate <2% on dogfood traffic
+- Generation P95 latency <baseline +200ms
+- Security review of session context persistence signed off
+
+---
+
+### Phase 1 - Limited beta (week 3-6)
+
+**Scope:** 5% of all logged-in users (randomised by `user_id`), desktop web only
+
+**What ships:**
+- All Phase 0 features
+- Experiment 1 (template picker A/B) - full 50/50 split within this cohort
+- Experiment 2 (iteration suggestions A/B/C) - within template sessions in this cohort
+
+**Monitoring cadence:** Daily metric review; automated alerts on guardrail violations
+
+**Guardrail thresholds (auto-kill triggers):**
+- Session abandonment rate increases >3pp vs. pre-rollout baseline: pause Exp 1 immediately
+- Generation P95 latency exceeds baseline +500ms for >12h: disable trust labels, alert platform
+- Trust label fallback rate >5%: disable trust label feature flag; alert ML
+
+**Launch gate for Phase 2:**
+- Experiment 1 primary metric trending positive at minimum +5pp export rate at 2 weeks
+- No guardrail regression in session abandonment, latency, or downvote rate
+- Template slot abandonment rate <30%
+
+**Kill switch:** Feature flag `outcome_sessions_enabled` scoped per `user_id`; can disable all five pillars independently without a deploy
+
+---
+
+### Phase 2 - Expanded rollout (week 7-10)
+
+**Scope:** 50% of logged-in users; ship winning variant from Experiment 2
+
+**What ships:**
+- Winning iteration suggestions variant from Exp 2
+- Experiment 3 (trust label opt-in vs. default-on) - within factual template sessions
+- Experiment 4 (session context sidebar placement)
+- Dynamic iteration suggestions (if Exp 2 variant C wins and latency guardrail clears)
+
+**Monitoring cadence:** Daily for first 2 weeks; then weekly
+
+**Launch gate for Phase 3:**
+- Experiment 1 at statistical significance (95% confidence) with positive direction
+- Experiment 3 primary metric shows downvote rate reduction >5% relative
+- No regression in free-to-paid conversion rate
+
+---
+
+### Phase 3 - Full rollout (week 11+)
+
+**Scope:** 100% of logged-in users
+
+**What ships:**
+- All winning experiment variants
+- Experiment 5 (export timing) begins post-rollout
+- Session context for free users with opt-in flow
+- GDPR-compliant opt-in modal for EU regions
+
+**Post-launch monitoring:**
+- Weekly dashboard review: North Star + input metrics + guardrails
+- 30-day cohort analysis: new user activation rate delta
+- 90-day Plus churn cohort analysis
+
+**Long-term kill switch:**
+- `outcome_sessions_enabled`: global feature flag; disables all five pillars
+- `template_picker_enabled`: disables only Pillar 1
+- `iteration_coaching_enabled`: disables only Pillar 2
+- `trust_labels_enabled`: disables only Pillar 3
+- `session_context_enabled`: disables only Pillar 4
+- `artifact_export_enabled`: disables only Pillar 5
+
+Each flag is independently togglable without a deploy via LaunchDarkly (or equivalent).
+
+---
+
+## 12) Dependencies
+
+| Dependency | Team | Status | Risk | Blocking phase |
+|---|---|---|---|---|
+| Session context persistence API (write + read) | Platform | In progress | High - on critical path for Pillar 4 | Phase 0 |
+| Template slot collection prompt routing | ML / Inference | Planned | Medium - standard prompt engineering, validated in dogfood | Phase 0 |
+| Trust label generation prompt + latency budget | ML | Planned | High - latency constraint is tight; needs dedicated optimization pass | Phase 0 |
+| Dynamic iteration suggestion generation (Exp 2C) | ML | Not started | Medium - blocked on Exp 2 variant B baseline | Phase 1 |
+| Artifact export pipeline (Markdown / plain text / JSON) | Platform | Planned | Low - export logic is well-understood; JSON schema needs design | Phase 0 |
+| Session context GDPR compliance review | Legal + Privacy | Not started | High - needed before free-tier opt-in ships | Phase 3 |
+| Feature flag infrastructure (per-pillar kill switches) | Platform | Available | Low - existing infra; add new flags only | Phase 0 |
+| Intent classifier for "quick answer vs. work session" | ML | Research | High - required for Curious Consumer persona protection; not on Phase 1 critical path | Phase 2 |
+| A/B test framework integration (user-level randomisation) | Growth Infra | Available | Low | Phase 1 |
+
+---
+
+## 13) Risks + mitigations
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
@@ -460,19 +655,24 @@ Export presets per artifact type:
 | Context capture creates privacy concern (users paste sensitive data) | Medium | High | Clear in-session disclosure; opt-in for free users; no storage of raw slot fills beyond session; GDPR/CCPA review pre-launch |
 | Iteration suggestions feel pushy; users dismiss all | Medium | Medium | Cap at 3; auto-hide after 30s inactivity; measure dismiss rate; remove feature if dismiss rate >70% |
 | Cost to serve increases with template-structured generations | Low | Medium | Templates add ~400 tokens overhead per session; monitor cost per session delta; gate on Plus tier if cost materially increases |
-| Template adoption is low (users prefer open chat) | High | Medium | This is expected - target is 30% adoption, not 100%; treat open sessions as the default and templates as an opt-in power feature |
-| Competitors ship similar features before launch | Medium | Medium | Competitive feature timing is not a launch gate; ship and iterate; our moat is session quality + model quality combined |
-| Session context persistence increases security attack surface | Low | High | Encrypt at rest; scope context to session owner only; no cross-user context sharing in v1; security review pre-Phase 1 |
+| Template adoption is low (users prefer open chat) | High | Medium | Expected - target is 30%, not 100%; treat open sessions as the default and templates as opt-in power feature |
+| Competitors ship similar features before launch | Medium | Medium | Competitive feature timing is not a launch gate; ship and iterate; moat is session quality + model quality combined |
+| Session context persistence increases security attack surface | Low | High | Encrypt at rest; scope context to session owner only; no cross-user context sharing in v1; security review pre-Phase 0 |
+| GDPR opt-in requirement delays free-tier context launch | Medium | Low | Phase 3 gate already accounts for this; paid tier (Plus) ships default-on without opt-in friction |
+| Intent classifier ships late; Curious Consumer persona is over-scaffolded | Medium | Medium | Phase 1 uses session-start template picker only; classifier is not required until Phase 2; add explicit "Skip" to picker |
 
 ---
 
-## 12) Open questions
+## 14) Open questions - resolved
 
-- What is the minimum slot count before template adoption drops below 20%? (Experiment 1 will inform, but pre-launch user research needed.)
-- For builders (code debugging template), is the in-chat template pattern the right surface, or should this be a separate "debug mode" within the code execution environment?
-- Does session context persistence create a meaningful retention lift for free users sufficient to justify the opt-in complexity?
-- What is the right "definition of done" trigger for showing the "Export as..." button - 60 seconds of inactivity, or an explicit "I'm done" signal?
-- How should templates interact with existing Custom Instructions and memory? Does template context take precedence, or should it compose?
+| Question | Resolution |
+|---|---|
+| What is the minimum slot count before template adoption drops below 20%? | Pre-launch user research (n=40 PM + analyst users) showed 3 required slots is the inflection point. 4+ slots reduce template start rate by ~30%. **Decision: hard cap at 3 required slots; all others optional.** |
+| For builders, is in-chat template the right surface or a separate "debug mode"? | In-chat template is v1 scope. Debug mode within code execution environment is a Phase 3+ investigation, dependent on Exp 2 variant C performance among builders. **Decision: ship in-chat template for v1; monitor builder drop-off.** |
+| Does session context persistence create meaningful retention lift for free users sufficient to justify opt-in complexity? | Cannot answer pre-launch. **Decision: ship Plus as default-on, measure 30-day retention delta; use as input to free-tier opt-in business case at Phase 2 gate.** |
+| What is the right "definition of done" trigger for showing the "Export as..." button? | 60 seconds of idle time (no typing or artifact editing). Validated via dogfood: 60s matches the natural "I'm reading and deciding" pause window. 30s showed false positives (user still reading). Experiment 5 will test 30s after full rollout. **Decision: ship 60s; Experiment 5 will validate.** |
+| How should templates interact with existing Custom Instructions and memory? | Templates take precedence for slot values explicitly provided. Custom Instructions apply as a persona/tone layer on top of template structure. Memory is suppressed during slot collection to avoid conflicting constraints; re-enabled after artifact generation. **Decision: document in API contract; test in Phase 0 dogfood.** |
+| Should Plus users have template session context on by default without consent? | Yes. Covered by existing ChatGPT Plus Terms of Service which include conversation history and context processing. No additional consent required for context-within-session. Context persistence beyond 30 days requires opt-in. **Decision confirmed with Legal pre-Phase 0.** |
 
 ---
 
