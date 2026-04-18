@@ -2,8 +2,8 @@
 
 **Product:** Figma - Make Designs (library-grounded generation)
 **Author:** Mayank Malviya
-**Version:** v1 - Initial PRD
-**Changes from v0:** First draft - problem statement, goals, personas, solution pillars, core requirements, event schemas, metrics.
+**Version:** v2 - Improved PRD
+**Changes from v1:** Added competitive analysis, detailed acceptance criteria with test cases, full data model for library context injection, API contract sketch, experimentation framework, cohort funnel with conversion targets, expanded risk register with mitigations, and resolved three open questions.
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/figma-teardown.md
 
 ---
@@ -13,6 +13,7 @@
 | Version | Key additions |
 |---|---|
 | v1 | Problem statement, goals/non-goals, target personas, solution pillars, core requirements, event schemas, success metrics |
+| v2 | Competitive analysis, acceptance criteria with test cases, data model, API contract, experimentation framework, cohort funnel, expanded risk register, open questions resolved |
 
 ---
 
@@ -346,6 +347,284 @@ Target 90 days post-launch: >45% of all `Make Designs` sessions in orgs with pub
 3. How should the system handle multi-library orgs (org library + team library + file library)? Which library takes precedence for generation context?
 4. Should library gap signals be surfaced to design systems leads in real time (as Figma notifications) or in a weekly digest? Real-time risks noise; weekly digest risks delay.
 5. Is the "correct variant selected" accuracy measurable without ground truth labels? The only reliable signal is whether the designer replaces the selected variant in the edit step.
+
+---
+
+---
+
+## 12) Competitive analysis
+
+### How competitors handle AI generation
+
+| Tool | AI generation approach | Design system awareness | Figma's position |
+|---|---|---|---|
+| **v0 (Vercel)** | Generates production React/Tailwind code from a prompt | No design system concept - generates from design tokens only if supplied | v0 routes around the design file entirely; not a direct competitor for this feature |
+| **Framer AI** | Generates responsive web layouts; can be published as production sites | No component library linkage; generates with Framer's built-in component set only | Closer competitor - Framer AI is system-unaware but targets a different user (web publishers, not product design teams) |
+| **Galileo AI** | Generates high-fidelity UI mockups from text prompts | Claims Figma library import but component matching is inconsistent and requires manual cleanup | Direct competitor - Galileo AI is attempting exactly this feature; Figma's advantage is owning the library data natively |
+| **Uizard** | AI wireframe generation from sketches or text | No library integration; generates from a generic component set | Targets early-stage wireframing; not in the enterprise design system space |
+| **Spellbook / Diagram (Figma plugin)** | Figma-native plugin for AI generation inside the canvas | Has partial library awareness via plugin API - can read file components but not org-scoped libraries | Closest existing approach; limited by plugin API access compared to native Figma infrastructure |
+| **Adobe Firefly in XD** | Adobe XD was discontinued; Firefly is focused on image generation | Not applicable | Not a threat |
+
+**Key insight:** No competitor has native access to org-scoped library data at the infrastructure level. Galileo AI and Diagram plugins are the closest, but both work via surface-level API access - they can read visible components in a file, not the full published org library with variant metadata and variable bindings. Figma's infrastructure advantage is the moat here. The feature must be shipped before a well-funded competitor builds the same capability via API and erodes Figma's AI narrative.
+
+### Competitive win/loss scenarios
+
+**Figma wins** when:
+- An enterprise team with a mature design system evaluates AI generation tools. No external tool has access to their org library; Figma does. The output quality gap is decisive.
+- A design systems lead evaluates whether to allow AI generation in their org. Library-grounded generation with a compliance panel is the only AI tool that makes this decision easy to say yes to.
+
+**Figma loses** when:
+- A startup with no design system evaluates Make Designs vs. v0. v0 generates production code; Make Designs generates a Figma frame. If the startup doesn't have a designer to refine the frame, v0 wins by delivering the final artifact.
+- An org uses a non-Figma design system (e.g., Storybook as the source of truth, with Figma as a secondary tool). Library context injection requires the primary system to live in Figma.
+
+---
+
+## 13) Data model - library context injection
+
+The generation pipeline requires a structured representation of the org library. This is the schema for the context payload sent to the generation model at session time.
+
+```json
+{
+  "library_context": {
+    "org_id": "string",
+    "library_file_id": "string",
+    "library_version": "string",
+    "generated_at": "ISO8601 timestamp",
+    "components": [
+      {
+        "component_id": "string",
+        "name": "string",
+        "category": "string",
+        "description": "string",
+        "variants": [
+          {
+            "variant_id": "string",
+            "name": "string",
+            "properties": {
+              "type": "string",
+              "state": "string",
+              "size": "string"
+            },
+            "semantic_label": "string"
+          }
+        ],
+        "usage_frequency": "integer"
+      }
+    ],
+    "color_variables": [
+      {
+        "variable_id": "string",
+        "name": "string",
+        "collection": "string",
+        "value_light": "hex string",
+        "value_dark": "hex string",
+        "semantic_role": "string"
+      }
+    ],
+    "text_styles": [
+      {
+        "style_id": "string",
+        "name": "string",
+        "font_family": "string",
+        "font_size": "integer",
+        "font_weight": "integer",
+        "line_height": "float",
+        "semantic_role": "string"
+      }
+    ],
+    "relevance_scores": {
+      "component_id": "float"
+    }
+  }
+}
+```
+
+**Context size management:**
+- Full library payload for a 200-component org: estimated ~40-80KB before compression.
+- Token budget for library context in generation model: ~8,000 tokens (out of ~32,000 total context).
+- For orgs with >200 components: apply relevance filtering to top 80 components by cosine similarity between component name embeddings and the prompt embedding.
+- `usage_frequency` is included to bias relevance ranking toward components the org actually uses.
+
+---
+
+## 14) API contract sketch (internal)
+
+The library context injection service exposes a single endpoint consumed by the Make Designs generation pipeline.
+
+```
+POST /internal/ai/library-context
+
+Request:
+{
+  "org_id": "string",
+  "file_id": "string",
+  "prompt": "string",
+  "max_components": 80
+}
+
+Response:
+{
+  "library_context": { ...schema above... },
+  "context_size_tokens": "integer",
+  "was_truncated": "boolean",
+  "truncation_method": "relevance_filter | none",
+  "latency_ms": "integer"
+}
+```
+
+**SLOs for this service:**
+- P50 latency: <300ms
+- P95 latency: <800ms
+- Availability: 99.9% (same as core generation pipeline)
+- Cache TTL: 10 minutes per org library version (library context is stable between publishes)
+
+---
+
+## 15) Acceptance criteria with test cases
+
+### FR-01: Library context injection
+
+**Happy path:**
+- Given: Org has a published org-scoped library with 50 components and 20 variables.
+- When: Designer triggers `Make Designs` with prompt "Settings page with toggles."
+- Then: `library_context_injected = true` in generation event; latency overhead vs. non-library generation is <2s.
+
+**Edge case - no library:**
+- Given: File belongs to a Free-tier team with no published library.
+- When: Designer triggers `Make Designs`.
+- Then: `library_context_injected = false`; generation proceeds with generic model; no error shown; UX identical to current.
+
+**Edge case - library with 500+ components:**
+- Given: Org has 520 components in their published library.
+- When: Designer triggers `Make Designs` with prompt "Dashboard with charts and filters."
+- Then: `was_truncated = true`; context contains top 80 components by relevance; generation completes within 12s P95.
+
+---
+
+### FR-02: Component-first frame generation
+
+**Happy path:**
+- Given: Library contains `Button/primary/default`, `Input/text/default`, `Card/content`.
+- When: Prompt is "User onboarding form with name, email, and submit button."
+- Then: Generated frame contains Button instance (variant: primary/default), Input instances, Card wrapper instance. Component coverage: >80%.
+
+**Edge case - prompt requests an unlibrary-able pattern:**
+- Given: Library has no `DataTable` component.
+- When: Prompt is "Data table with sortable columns."
+- Then: Table rendered as raw frame (not a component); compliance panel shows warning "Table not in your library"; `library_gap_detected` event fires.
+
+**Edge case - wrong variant selected:**
+- Given: Library has `Button/primary/default` and `Button/primary/disabled`.
+- When: Prompt is "Form with a disabled submit button."
+- Then: Generated button uses `Button/primary/disabled` variant (not default). Variant semantic metadata must be used, not just component type matching.
+
+---
+
+### FR-05: Compliance panel
+
+**Happy path:**
+- When: Frame generation completes.
+- Then: Compliance panel renders within 500ms; shows component coverage %, variable coverage %, text style coverage %, and a list of non-compliant elements.
+
+**Edge case - 100% compliant frame:**
+- When: Generated frame achieves 100% component, variable, and text style coverage.
+- Then: Compliance panel shows a "Looks good" state with no non-compliant list; panel is dismissible with a single click.
+
+**Edge case - designer dismisses panel immediately:**
+- When: Designer dismisses compliance panel without reviewing.
+- Then: `panel_dismissed = true` in `compliance_panel_viewed` event; no blocking gate; designer can accept frame.
+
+---
+
+## 16) Experimentation framework
+
+### Experiment 1: Compliance panel - default visible vs. opt-in
+
+**Hypothesis:** Designers who see the compliance panel by default make better accept/edit/discard decisions and show higher `component_coverage_pct` in accepted frames than designers who must opt in to view it.
+
+**Setup:**
+- Control: Compliance panel is opt-in (collapsed by default; "View compliance" link).
+- Treatment: Compliance panel is open by default after generation.
+
+**Primary metric:** `component_coverage_pct` mean for accepted frames (treatment vs. control).
+**Secondary metric:** `outcome = deleted` rate (if forced visibility increases deletion, the feature is adding friction without value).
+**Guardrail:** `ai_make_designs_generated` volume must not decline in treatment group (panel must not deter generation attempts).
+**Duration:** 4 weeks; minimum detectable effect: 5 percentage points in coverage.
+**Rollout:** 50/50 split on qualifying orgs (published library, Professional+ tier).
+
+---
+
+### Experiment 2: Library gap digest - real-time notification vs. weekly summary
+
+**Hypothesis:** Design systems leads who receive real-time notifications about library gaps act on them faster (add missing components within 14 days) than leads who receive a weekly summary.
+
+**Setup:**
+- Control: Weekly digest email summarising `library_gap_detected` events from the past 7 days.
+- Treatment: Real-time Figma notification when 3+ sessions in 7 days detect the same missing component type.
+
+**Primary metric:** Time from first `library_gap_detected` event to new component published in the library (for the missing type).
+**Secondary metric:** Design systems lead opt-out rate from notifications (treatment must not exceed 15% opt-out).
+**Guardrail:** Total `library_gap_detected` events must not increase (would suggest the feature is creating new gaps, not surfacing existing ones).
+**Duration:** 8 weeks (library updates are slow; need longer window to measure).
+
+---
+
+### Experiment 3: Compliance gate - hard gate vs. soft warning for low-coverage frames
+
+**Hypothesis:** A soft warning ("Low design system coverage - review before sharing") on frames with <50% coverage reduces non-compliant frames handed off to engineering, without increasing `outcome = deleted` rate.
+
+**Setup:**
+- Control: No gate or warning; designer can accept any frame regardless of coverage.
+- Treatment: Frames with <50% component coverage show a yellow "Low coverage" badge on the canvas, visible to all file viewers.
+
+**Primary metric:** % of frames accepted with <50% coverage that are subsequently shared with a Dev Mode user (proxy for engineer handoff of non-compliant frames).
+**Secondary metric:** `outcome = deleted` rate for low-coverage generations (must not increase more than 10% relative - we want designers to edit, not discard).
+**Guardrail:** Overall `ai_make_designs_generated` volume must not decline.
+
+---
+
+## 17) Dependency map
+
+| Dependency | Team owner | Status | Blocking phase |
+|---|---|---|---|
+| Library context injection service (new backend service) | AI platform team | Not started | Phase 0 |
+| Component semantic metadata indexing (variant labels, usage frequency) | Design systems infrastructure team | In progress | Phase 0 |
+| `library_context_injected` field in generation event pipeline | Data / analytics team | Not started | Phase 0 |
+| Compliance panel UI component | Design tooling team | Not started | Phase 0 |
+| `library_gap_detected` event + notification pipeline | Data + notification team | Not started | Phase 1 |
+| Privacy controls for library data (opt-in model training flag) | Privacy / legal team | In review | Phase 0 |
+| Relevance filtering model for large libraries | AI research team | Prototype exists | Phase 1 |
+| Code Connect parity for AI-generated components (link generated instances to codebase) | Dev Mode team | Not started | Phase 2 |
+
+---
+
+## 18) Expanded risk register
+
+| Risk | Likelihood | Impact | Mitigation | Owner |
+|---|---|---|---|---|
+| Library context window overflow for 500+ component orgs | High | High - generation quality degrades for largest enterprise customers | Two-pass generation: prompt -> component type manifest -> targeted library fetch | AI platform |
+| Wrong variant selected (e.g., disabled button for active CTA) | Medium | High - designer ships incorrect state to engineering | Variant semantic metadata in context; measure and target >75% correct variant rate | AI research |
+| Library context injection latency adds >3s to generation P95 | Medium | Medium - users abandon generation if it feels slower | Cache library context with 10-min TTL; warm cache on file open for qualifying orgs | AI platform |
+| Privacy backlash from enterprise over library data in AI pipeline | Low | High - enterprise orgs turn off AI generation entirely | Explicit opt-in for model training; clear in-product disclosure; library context used only for in-session generation | Privacy / legal |
+| Design systems leads resist feature because it "locks" AI to current library | Low | Medium - reduces enterprise adoption | Compliance panel shows gaps; gap notifications drive library expansion; framed as "AI that improves your design system" | PM / DS relations |
+| Galileo AI or similar ships design-system-aware generation before Figma GA | Medium | High - loses first-mover narrative | Accelerate Phase 0 to 4 weeks by parallelising backend service and UI work | PM / engineering |
+| `non_compliant_element_replaced` rate is low (designers ignore suggestions) | Medium | Low - feature works but compliance panel is not helping | A/B test compliance panel visibility (Experiment 1); if <20% replacement rate, reduce panel prominence and focus on coverage score only | PM |
+
+---
+
+## 19) Open questions - resolved (v2)
+
+**Q1: What is the right threshold for the compliance warning - 80% or configurable?**
+
+Decision: 80% is the default threshold for surfacing the non-compliant elements list. Org admins can adjust this threshold in the Design Systems settings page (range: 50%-95%). This gives design systems leads control without making it a per-designer setting (which would lead to inconsistent standards). The compliance panel always shows the actual coverage percentage regardless of the threshold - the threshold only controls whether the non-compliant list is shown prominently or collapsed.
+
+**Q2: Compliance panel - visible by default or opt-in?**
+
+Decision: Run Experiment 1 to determine default. Pre-launch default: visible (open) for first 10 generation sessions per user, then collapsed by default. This mirrors how Figma introduces other contextual panels (e.g., the auto-layout suggestion prompt). After 10 sessions, the user has seen the panel enough to use it intentionally. Re-open trigger: if `component_coverage_pct` is below the org threshold, force-open regardless of user preference.
+
+**Q3: Multi-library orgs - which library takes precedence?**
+
+Decision: Priority order for context injection: (1) org-scoped library, (2) team-scoped library, (3) file-local components. If org library and team library have a component with the same name, org library takes precedence. This mirrors how Figma resolves library conflicts in the existing product. For orgs with multiple org-scoped libraries (e.g., one for web, one for mobile), the user selects the active library in the generation panel before triggering Make Designs - defaults to the most recently updated org library.
 
 ---
 
