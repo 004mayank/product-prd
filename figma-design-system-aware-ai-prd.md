@@ -2,8 +2,8 @@
 
 **Product:** Figma - Make Designs (library-grounded generation)
 **Author:** Mayank Malviya
-**Version:** v2 - Improved PRD
-**Changes from v1:** Added competitive analysis, detailed acceptance criteria with test cases, full data model for library context injection, API contract sketch, experimentation framework, cohort funnel with conversion targets, expanded risk register with mitigations, and resolved three open questions.
+**Version:** v3 - Final PRD
+**Changes from v2:** Added phased rollout plan with quantitative go/no-go gates per phase, kill switches and rollback procedures, launch readiness checklist, two additional experiments in the backlog, all five open questions from section 11 fully resolved, SLO revision history, and a version history table aligned with v3 format.
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/figma-teardown.md
 
 ---
@@ -13,7 +13,8 @@
 | Version | Key additions |
 |---|---|
 | v1 | Problem statement, goals/non-goals, target personas, solution pillars, core requirements, event schemas, success metrics |
-| v2 | Competitive analysis, acceptance criteria with test cases, data model, API contract, experimentation framework, cohort funnel, expanded risk register, open questions resolved |
+| v2 | Competitive analysis, acceptance criteria with test cases, data model, API contract, experimentation framework (3 experiments), cohort funnel, expanded risk register, open questions partially resolved (Q1-Q3) |
+| v3 | Phased rollout plan with go/no-go gates and kill switches, launch readiness checklist, all open questions resolved (Q4-Q5 added), two additional experiments, SLO revision history, final dependency ownership, production instrumentation checklist |
 
 ---
 
@@ -340,13 +341,9 @@ Target 90 days post-launch: >45% of all `Make Designs` sessions in orgs with pub
 
    *Mitigation:* Library context is used only for in-session generation and is not retained after session end unless the org admin has opted in to model training. Make this explicit in the privacy settings page.
 
-### Open questions
+### Open questions - resolved in v3 (see Section 20)
 
-1. What is the right threshold for the compliance warning before accepting a frame? Is 80% component coverage the right gate, or should we let designers decide via the compliance panel without a hard gate?
-2. Should the compliance panel be visible by default or opt-in? Default visibility adds value but may annoy experienced designers who trust their own judgment.
-3. How should the system handle multi-library orgs (org library + team library + file library)? Which library takes precedence for generation context?
-4. Should library gap signals be surfaced to design systems leads in real time (as Figma notifications) or in a weekly digest? Real-time risks noise; weekly digest risks delay.
-5. Is the "correct variant selected" accuracy measurable without ground truth labels? The only reliable signal is whether the designer replaces the selected variant in the edit step.
+All five open questions are now resolved. See Section 20 for decisions and rationale.
 
 ---
 
@@ -583,18 +580,49 @@ Response:
 
 ---
 
+### Experiment 4: Prompt pre-flight - component type manifest preview before generation
+
+**Hypothesis:** Showing designers a 2-second preview of which component types the AI intends to use ("I'll use Button, Card, Toggle from your library") before starting generation increases `outcome = accepted` rate by reducing surprise when the frame appears.
+
+**Setup:**
+- Control: Current flow - generation starts immediately after prompt submission.
+- Treatment: A 2-second "planning" step displays a bulleted list of component types the AI identified in the prompt. Designer can cancel or proceed.
+
+**Primary metric:** `outcome = accepted` rate (not edited, not deleted) - hypothesis is that transparency reduces regret-driven deletion.
+**Secondary metric:** Time-to-outcome (must not increase by more than 5 seconds in treatment - the 2s preview is net positive only if it reduces downstream editing time).
+**Guardrail:** `ai_make_designs_generated` submission rate must not drop (the preview step must not deter generation attempts).
+**Duration:** 3 weeks; 50/50 split on orgs with published libraries.
+**Kill condition:** If `outcome = deleted` rate increases more than 5% relative in treatment, the pre-flight preview is adding anxiety, not clarity - kill immediately.
+
+---
+
+### Experiment 5: Variant confidence labelling in the compliance panel
+
+**Hypothesis:** When the compliance panel shows a confidence score for each variant selection ("Button/primary/default - 87% confident this is the right variant"), designers fix more variant mismatches pre-handoff, reducing `correct variant selected` rework in engineering.
+
+**Setup:**
+- Control: Compliance panel shows component instance with no confidence score.
+- Treatment: Compliance panel shows component instance + a confidence percentage for the variant choice. Variants below 70% confidence are highlighted in amber.
+
+**Primary metric:** Rate at which designers click "swap variant" for amber-highlighted instances (proxy for low-confidence variant corrections pre-handoff).
+**Secondary metric:** Dev Mode session depth after accepting library-grounded frames - specifically whether engineers are raising variant mismatch comments on accepted frames.
+**Guardrail:** Compliance panel dismiss rate must not increase (confidence labels must not make the panel feel noisier or harder to parse).
+**Duration:** 4 weeks.
+
+---
+
 ## 17) Dependency map
 
-| Dependency | Team owner | Status | Blocking phase |
-|---|---|---|---|
-| Library context injection service (new backend service) | AI platform team | Not started | Phase 0 |
-| Component semantic metadata indexing (variant labels, usage frequency) | Design systems infrastructure team | In progress | Phase 0 |
-| `library_context_injected` field in generation event pipeline | Data / analytics team | Not started | Phase 0 |
-| Compliance panel UI component | Design tooling team | Not started | Phase 0 |
-| `library_gap_detected` event + notification pipeline | Data + notification team | Not started | Phase 1 |
-| Privacy controls for library data (opt-in model training flag) | Privacy / legal team | In review | Phase 0 |
-| Relevance filtering model for large libraries | AI research team | Prototype exists | Phase 1 |
-| Code Connect parity for AI-generated components (link generated instances to codebase) | Dev Mode team | Not started | Phase 2 |
+| Dependency | Team owner | Status | Blocking phase | SLO |
+|---|---|---|---|---|
+| Library context injection service (new backend service) | AI platform team | Not started | Phase 0 | P95 latency <800ms; availability 99.9% |
+| Component semantic metadata indexing (variant labels, usage frequency) | Design systems infrastructure team | In progress | Phase 0 | Index freshness: updated within 5 minutes of library publish |
+| `library_context_injected` field in generation event pipeline | Data / analytics team | Not started | Phase 0 | Event delivery lag <30s; zero dropped events |
+| Compliance panel UI component | Design tooling team | Not started | Phase 0 | Render latency <500ms post-generation |
+| `library_gap_detected` event + notification pipeline | Data + notification team | Not started | Phase 1 | Gap event deduplication window: 7 days per org per element type |
+| Privacy controls for library data (opt-in model training flag) | Privacy / legal team | In review | Phase 0 | Legal sign-off required before any Phase 0 sessions |
+| Relevance filtering model for large libraries | AI research team | Prototype exists | Phase 1 | Relevance filter P95 latency <200ms; >75% recall for top-3 relevant components |
+| Code Connect parity for AI-generated components | Dev Mode team | Not started | Phase 2 | Generated component instances must link to Code Connect entries if available |
 
 ---
 
@@ -609,6 +637,7 @@ Response:
 | Design systems leads resist feature because it "locks" AI to current library | Low | Medium - reduces enterprise adoption | Compliance panel shows gaps; gap notifications drive library expansion; framed as "AI that improves your design system" | PM / DS relations |
 | Galileo AI or similar ships design-system-aware generation before Figma GA | Medium | High - loses first-mover narrative | Accelerate Phase 0 to 4 weeks by parallelising backend service and UI work | PM / engineering |
 | `non_compliant_element_replaced` rate is low (designers ignore suggestions) | Medium | Low - feature works but compliance panel is not helping | A/B test compliance panel visibility (Experiment 1); if <20% replacement rate, reduce panel prominence and focus on coverage score only | PM |
+| Multi-library conflict causes wrong component set injected | Low | High - entire generation session uses wrong brand system | Enforce library priority order: org > team > file; log `library_scope_used` in every generation event | AI platform |
 
 ---
 
@@ -625,6 +654,195 @@ Decision: Run Experiment 1 to determine default. Pre-launch default: visible (op
 **Q3: Multi-library orgs - which library takes precedence?**
 
 Decision: Priority order for context injection: (1) org-scoped library, (2) team-scoped library, (3) file-local components. If org library and team library have a component with the same name, org library takes precedence. This mirrors how Figma resolves library conflicts in the existing product. For orgs with multiple org-scoped libraries (e.g., one for web, one for mobile), the user selects the active library in the generation panel before triggering Make Designs - defaults to the most recently updated org library.
+
+---
+
+## 20) Open questions - resolved (v3)
+
+**Q4: Should library gap signals be surfaced to design systems leads in real time (as Figma notifications) or in a weekly digest?**
+
+Decision: Neither exclusively. The right delivery mode depends on the gap's signal strength. Implement a tiered notification model:
+
+- **Tier 1 - Immediate notification:** A single missing component type appears in 5+ generation sessions within 24 hours. This is a strong signal of an active team need. Surface as a Figma bell notification with a link to the gap report. Threshold is high enough to suppress false positives from a single PM experimenting with prompts.
+- **Tier 2 - Weekly digest:** Any gap that crosses the 3-session threshold in 7 days but not the Tier 1 threshold. Batched into a weekly email to the design systems lead with a table of missing component types, session count, and a sample prompt.
+- **Opt-out:** Design systems leads can downgrade Tier 1 to Tier 2 for any gap type they have already triaged ("we know we don't have a Table component; stop reminding us"). This prevents notification fatigue for known gaps.
+
+Run Experiment 2 to validate whether Tier 1 real-time notifications materially shorten time-to-component vs. the Tier 2 weekly digest. If the difference is less than 7 days (i.e., real-time and weekly lead to the same outcome within the sprint cycle), simplify to weekly-only to reduce notification surface complexity.
+
+**Q5: Is the "correct variant selected" accuracy measurable without ground truth labels?**
+
+Decision: Yes, via three observable proxy signals, with explicit limitations.
+
+- **Primary proxy - post-acceptance variant swap rate:** After accepting a library-grounded frame, if the designer immediately swaps a variant within the first 60 seconds of the editing session (before making other changes), that is a strong signal the AI selected the wrong variant. Track this as `variant_swapped_immediately` (window: <60s post-accept). This is not a perfect signal - designers sometimes swap variants by preference, not by correction - but at population scale it is a reliable quality indicator.
+- **Secondary proxy - Dev Mode comment rate on variant elements:** When an engineer in Dev Mode leaves a comment on a component instance from an AI-generated frame, the comment is a proxy for a variant mismatch or compliance issue. Track `devmode_comment_on_ai_generated_component` events; analyse whether comment rate is higher for AI-generated instances vs. manually placed instances.
+- **Long-term ground truth path:** In Phase 2 of the rollout, add an optional thumbs-up/thumbs-down micro-feedback on each variant in the compliance panel ("Is this the right variant?"). Collect labelled data for 8 weeks, use it to fine-tune the variant selection model, and measure whether `variant_swapped_immediately` rate decreases in the post-fine-tuning cohort vs. pre-fine-tuning cohort.
+
+**Accuracy target:** >75% of variant selections are the contextually correct variant, measurable via `variant_swapped_immediately` rate below 15% within 60 seconds of frame acceptance. Establish this baseline in Phase 0 dogfood before Phase 1 beta launch.
+
+---
+
+## 21) Phased rollout plan
+
+### Phase 0 - Internal dogfood (weeks 1-4)
+
+**Goal:** Validate that the library context injection pipeline works end-to-end without breaking existing Make Designs behaviour. Establish accuracy baselines for component coverage, variant selection, and latency.
+
+**Scope:**
+- Enable for Figma's internal design team only (estimated 150-300 designers).
+- Library context injected when user triggers Make Designs in a file with a published org library.
+- Compliance panel shown post-generation.
+- All 4 generation events instrumented and logging to the internal analytics pipeline.
+- Generic generation remains the fallback for any session where context injection fails.
+
+**Go/no-go criteria to advance to Phase 1:**
+
+| Criterion | Threshold | Source |
+|---|---|---|
+| `library_context_injected = true` rate for qualifying sessions | >98% | `ai_make_designs_generated` event |
+| Library context injection service P95 latency | <800ms | Service metrics |
+| Generation end-to-end P95 latency (library-grounded sessions) | <10s | `generation_latency_ms` field |
+| `component_coverage_pct` mean across all internal sessions | >70% | `ai_make_designs_generated` event |
+| `outcome = deleted` rate for library-grounded sessions | <50% | Same event |
+| Zero critical bugs (incorrect library applied, privacy data leakage) | 0 P0 incidents | Incident log |
+
+**Kill switch:** Feature flag per org. If any criterion is missed or a P0 incident occurs, disable library context injection for all sessions within 30 minutes; revert to generic generation with no user-facing error.
+
+**Rollback plan:** Library context injection is additive to the generation pipeline - removing it reverts seamlessly to the existing generic generation path. No data migration required. All events continue firing with `library_context_injected = false`.
+
+---
+
+### Phase 1 - Closed beta: enterprise design systems teams (weeks 5-10)
+
+**Goal:** Validate output quality with enterprise orgs that have mature, high-component-count libraries. Collect qualitative signal from design systems leads on compliance panel utility and gap notification relevance.
+
+**Scope:**
+- Invite 10-15 enterprise orgs with published org-scoped libraries containing >100 components and >20 variables.
+- Manual selection: prioritise orgs with active Make Designs usage in the past 30 days (ensures we are testing with engaged users, not cold-start testers).
+- Show "Generated with your design system" label on AI-generated frames.
+- Run Experiment 2 (gap notification) as a 50/50 split within this cohort.
+- Collect structured qualitative feedback via an in-Figma survey (5 questions, triggered 7 days post-enable): "Did the AI use the right components?", "Was the compliance panel useful?", "Did you change fewer elements than with generic generation?", "Would you use this for real handoff work?", "Net Promoter Score for this feature."
+
+**Go/no-go criteria to advance to Phase 2:**
+
+| Criterion | Threshold | Source |
+|---|---|---|
+| `component_coverage_pct` mean for beta orgs | >78% | Event data |
+| `outcome = accepted or edited` rate for library-grounded sessions | >50% | Event data |
+| `variant_swapped_immediately` rate (<60s post-accept) | <20% | Event data |
+| Survey: "Did the AI use the right components?" positive response rate | >60% | In-product survey |
+| Survey: "Would you use this for real handoff work?" positive response rate | >40% | In-product survey |
+| Generation latency P95 for orgs with 200-400 component libraries | <12s | Service metrics |
+| No increase in `ai_make_designs_generated` volume drop (orgs must not reduce generation attempts) | Volume must not decline >10% after feature enable | Event data |
+
+**Kill switch:** Per-org disable flag. If any beta org reports generation quality regressions or privacy concerns, disable for that org within 2 hours. If >3 orgs report the same regression category, pause the entire Phase 1 cohort and investigate.
+
+**Auto-kill triggers:**
+- If `component_coverage_pct` mean drops below 60% for any org cohort after 2 weeks, pause and audit the relevance filtering model.
+- If generation latency P95 exceeds 15s for any library size category, pause and audit the context injection service.
+
+---
+
+### Phase 2 - Opt-in GA: Professional+ orgs with published libraries (weeks 11-16)
+
+**Goal:** Make library-grounded generation available to all Professional and Organisation tier orgs that have a published shared library. Feature is opt-in at the org admin level to give design systems leads control over adoption timing.
+
+**Scope:**
+- All Professional and Organisation tier orgs with at least one published shared library see a banner: "Your design system is now available in Make Designs - enable library-grounded generation."
+- Org admins can enable or disable the feature in the AI settings page.
+- Free users see no change (generic generation only).
+- Compliance panel defaults to open for first 10 sessions per user, then auto-collapses (per Q2 resolution).
+- Experiment 1 (compliance panel default visibility) runs across this population as a 50/50 split.
+- Experiment 4 (prompt pre-flight) runs across 20% of this population.
+- Library gap notifications go live per the Tier 1/Tier 2 model from Q4 resolution.
+
+**Go/no-go criteria to advance to Phase 3:**
+
+| Criterion | Threshold | Source |
+|---|---|---|
+| Opt-in rate among eligible orgs | >30% within 4 weeks of banner launch | Product analytics |
+| `component_coverage_pct` mean across all opted-in orgs | >75% | Event data |
+| `outcome = accepted or edited` rate for library-grounded sessions (all opted-in orgs) | >50% | Event data |
+| Free -> Professional conversion rate (guardrail - must not be hurt by the feature) | Must stay within 5% of pre-launch 30-day baseline | Revenue metrics |
+| Generation latency P95 across all opted-in orgs | <10s | Service metrics |
+| Design systems lead NPS (surveyed at day 30 post-enable) | NPS >20 | In-product survey |
+| `library_context_injection_failure_rate` | <0.5% | Service metrics |
+
+**Kill switch:** Org-level feature flag. Org admins can disable at any time from the AI settings page. Global kill: if `library_context_injection_failure_rate` exceeds 2% across the full population, disable library injection globally and fall back to generic generation within 15 minutes.
+
+---
+
+### Phase 3 - Default-on GA: all tiers and community libraries (week 17+)
+
+**Goal:** Design-system-aware generation is the default for every Make Designs session that has access to any library - org, team, file-local, or Figma community library (Material Design, iOS, etc.). Free users get the benefit of community libraries as a context source.
+
+**Scope:**
+- Library context injection is on by default for all tiers. Org admins can opt out in settings.
+- Community template libraries (Figma Material Design, iOS Design System) are used as context for Free users when no custom library exists.
+- "AI used these components" provenance panel is shown inline in the accepted frame, visible to all file collaborators.
+- Figma publishes a public quality benchmark: "% of Make Designs outputs requiring zero manual component replacements in library-enabled sessions" - target >75%.
+- Variant confidence labelling (Experiment 5) runs across 30% of the Phase 3 population.
+
+**Per-pillar kill switches (independent):**
+- Variable mapping: disable via `disable_variable_injection` flag if variable conflicts cause incorrect token application in >5% of sessions.
+- Component matching: disable via `disable_component_matching` flag if component misidentification rate exceeds 15% as measured by `variant_swapped_immediately` rate.
+- Community library fallback: disable via `disable_community_library_context` flag if community library components degrade output quality for custom-brand orgs (measured by `outcome = deleted` rate increasing >10% in Free user cohort vs. Phase 2 baseline).
+
+---
+
+## 22) Launch readiness checklist
+
+This checklist must be signed off by the accountable owner before Phase 2 GA launch. All items are blocking unless explicitly marked as non-blocking.
+
+### Engineering readiness
+
+- [ ] Library context injection service deployed to production with 99.9% availability SLO; load tested at 3x Phase 1 peak volume (AI platform team)
+- [ ] Context injection cache layer (10-minute TTL per org library version) validated under concurrent write load (AI platform team)
+- [ ] Relevance filtering model for >200 component libraries benchmarked: >75% recall for top-3 components in 50 benchmark prompts (AI research team)
+- [ ] Component semantic metadata index freshness verified: updated within 5 minutes of a library publish event in staging (Design systems infra team)
+- [ ] All 4 new analytics events (`ai_make_designs_generated` additions, `compliance_panel_viewed`, `non_compliant_element_replaced`, `library_gap_detected`) emitting correctly in production with zero dropped events in 48-hour canary (Data team)
+- [ ] Feature flags configured for per-org enable/disable; global kill switch tested in staging (Engineering)
+- [ ] Fallback to generic generation triggers correctly when `library_context_injected = false`; verified via chaos injection test (Engineering)
+
+### Legal and privacy readiness
+
+- [ ] Privacy review complete: library context data used only for in-session generation; no retention after session end (Privacy team)
+- [ ] Org admin consent flow for model training opt-in shipped to staging and reviewed by legal (Privacy / Legal)
+- [ ] Data processing addendum (DPA) language updated for enterprise customers reflecting library data handling (Legal)
+- [ ] Enterprise privacy FAQ page updated with library context handling documentation (Privacy / Legal)
+
+### Design and product readiness
+
+- [ ] Compliance panel passes accessibility audit: WCAG 2.1 AA compliance for all interactive elements (Design tooling team)
+- [ ] Compliance panel copy reviewed and approved by content design (no em-dashes; clear language for non-designer users) (PM / Content design)
+- [ ] "Generated with your design system" label and provenance panel reviewed by brand (Design)
+- [ ] Edge cases tested manually: 0-component library, 500+ component library, multi-library org, library with no variables, library with pending unpublished updates (QA)
+- [ ] User-facing error states defined for: context injection failure, generation timeout, compliance panel render failure (Design / Engineering)
+
+### Go-to-market readiness
+
+- [ ] Release notes drafted and reviewed (PM)
+- [ ] Design systems community blog post approved for publish date aligned with Phase 2 launch (Marketing)
+- [ ] CS team briefed on feature scope, common design systems lead questions, and escalation path for enterprise orgs reporting component quality issues (CS)
+- [ ] Support documentation published: "How Make Designs uses your design system," "How to configure library-grounded generation," "Understanding the compliance panel" (Support)
+
+### Monitoring readiness
+
+- [ ] Real-time dashboard live: `component_coverage_pct` mean, `outcome = deleted` rate, `library_context_injection_failure_rate`, generation latency P50/P95/P99 (Data team)
+- [ ] PagerDuty alerts configured: `library_context_injection_failure_rate` > 1% (warn), >2% (critical); generation latency P95 > 12s (warn), >15s (critical) (Engineering)
+- [ ] Week 1 post-launch review meeting scheduled with AI platform, data, and PM leads (PM)
+
+---
+
+## 23) SLO revision history
+
+| Metric | v1 target | v2 target | v3 target | Rationale for change |
+|---|---|---|---|---|
+| Library context injection P95 latency | Not specified | <800ms | <800ms; P50 <300ms | Added P50 target; most sessions benefit from the faster path |
+| Generation end-to-end P95 (library sessions) | <8s | <10s | <10s for standard; <12s for 400-500 component orgs | Split by library size; large-library orgs have a separate SLO |
+| `library_context_injection_failure_rate` | Not specified | <0.5% | <0.5% (warn at 1%); global kill at 2% | Added explicit alert and kill thresholds |
+| Compliance panel render latency | Not specified | <500ms | <500ms; degraded-mode fallback at 800ms (show score only, no list) | Added graceful degradation path |
+| Component instance accuracy (correct variant) | Not specified | >75% | >75%; measured via `variant_swapped_immediately` <15% | Made measurement method explicit |
+| `outcome = accepted or edited` rate | Not specified | >55% | >55% in Phase 1 beta; >50% at Phase 2 GA scale (larger population includes lower-intent users) | Separated beta target from GA target |
 
 ---
 
