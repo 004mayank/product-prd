@@ -1,7 +1,7 @@
 # Figma PRD: Engineering Review Activation - Closing the Cross-Functional Handoff Gap
 
-**Version:** v1 - Initial PRD
-**Changes from v0:** N/A - initial version
+**Version:** v2 - Improved PRD
+**Changes from v1:** Added detailed activation funnel analysis with stage-level drop-off data, full functional requirements and acceptance criteria per pillar, expanded event schema with all new events, competitive analysis with specific win/loss reasons, experiment backlog with hypotheses and metrics, per-feature edge case depth, dependency map, instrumentation spec, and resolved open questions from v1.
 **Source teardown:** figma-teardown.md (v3)
 **Lens:** Product Manager - scope is the designer-to-engineer handoff activation problem
 
@@ -12,6 +12,7 @@
 | Version | Key additions |
 |---|---|
 | v1 | Core problem thesis, user segments, activation funnel analysis, solution pillars, success metrics, non-goals, open questions, key risks |
+| v2 | Detailed funnel breakdown, functional requirements + acceptance criteria per pillar, full event schema, experiment backlog, competitive analysis with specific win/loss, edge cases per feature, dependency map, instrumentation spec, resolved open questions |
 
 ---
 
@@ -91,7 +92,42 @@ The cross-functional activation cliff is the single highest-leverage funnel prob
 
 ---
 
-## 4. Solution pillars
+## 4. Activation funnel analysis
+
+### Current state (inferred baseline)
+
+The cross-functional activation funnel has two documented failure points - the share-to-open cliff and the open-to-engage cliff:
+
+| Stage | Event | Inferred rate | Primary failure mode |
+|---|---|---|---|
+| File created | `file_created` | 100% baseline | - |
+| File shared with at least one non-designer | `file_shared` (viewer or dev_mode recipient) | ~55% of new files | Designer does not share proactively because they expect verbal briefing |
+| Non-designer opens the file within 7 days | `file_opened_by_non_editor` (within 7d) | ~35% of shared files (~19% of created files) | Engineer gets the link but doesn't prioritise switching contexts |
+| Non-designer switches to Dev Mode | `devmode_session_started` after `file_opened_by_non_editor` | ~30% of openers | Engineer opens file in canvas mode; doesn't know Dev Mode exists or how to activate it |
+| Non-designer leaves a comment | `comment_created` (commenter_role: viewer or dev_mode) | ~20% of Dev Mode sessions | Engineer copies what they need and leaves without commenting; no prompt to do so |
+| Comment triggers a reply from designer | `comment_resolved` or `reply_created` within 48h | ~60% of comments | Designer is responsive; this stage is relatively healthy once comments are created |
+
+### Stage-level interventions this PRD targets
+
+| Funnel stage | Pillar addressing it | Expected lift |
+|---|---|---|
+| Created -> Shared | Pillar 1 (review-ready prompt encourages explicit share action) | +10pp share rate |
+| Shared -> Opened within 7d | Pillar 3 (Linear/GitHub integration puts link in engineering workflow) + Pillar 4 (digest re-engagement) | +15pp open rate |
+| Opened -> Dev Mode started | Pillar 2 (engineering-first onboarding overlay) | +20pp Dev Mode activation on first open |
+| Dev Mode -> Comment | Pillar 2 step 3 (comment prompt as onboarding CTA) | +10pp comment rate |
+
+### Cohort retention impact (inferred)
+
+| Cross-functional activation milestone | Inferred D30 retention lift | Current cohort size (est.) |
+|---|---|---|
+| File shared with at least one non-designer | +40% vs. solo-designer files | ~55% of new design files |
+| Non-designer opens within 7 days | +35% above "shared" cohort | ~35% of shared files |
+| Non-designer leaves a comment | +50% above "opened" cohort | ~20% of opened files |
+| Dev Mode session by engineer within 30d | +60% M3 retention for team | ~30% of opener cohort |
+
+---
+
+## 5. Solution pillars - functional requirements and acceptance criteria
 
 ### Pillar 1 - Review-ready signal and handoff trigger
 
@@ -110,15 +146,38 @@ The cross-functional activation cliff is the single highest-leverage funnel prob
 | Previous handoff | No prior `handoff_triggered` event on this file | Suppression |
 | Engineer already present | No `file_opened_by_non_editor` event in last 24h | Suppression |
 
-When all required criteria are met and no suppression conditions apply:
-- Surface an inline prompt in the top bar: "This file looks ready for engineering review. Start the handoff?"
-- Prompt appears once per file; can be dismissed with "Not yet" (re-surfaces after 72h of additional edits).
-- If the designer confirms, the share modal pre-populates with "Dev Mode" access (not view-only) and prompts for a specific recipient.
-- File gets a visible "Ready for review" label in the project browser, visible to all team members.
+#### Functional requirements - Pillar 1
+
+| # | Requirement | Priority |
+|---|---|---|
+| P1-1 | System evaluates all four required heuristic signals on every file save that results in a state change (frame added, comment resolved, prototype link created) | P0 |
+| P1-2 | When all required signals are met and no suppression condition applies, show an inline prompt in the top bar within 500ms of the triggering save | P0 |
+| P1-3 | Prompt reads: "This file looks ready for engineering review. Start the handoff?" with two CTAs: "Start handoff" and "Not yet" | P0 |
+| P1-4 | "Not yet" dismisses the prompt and suppresses re-evaluation for 72 hours from the dismissal timestamp | P0 |
+| P1-5 | "Mark as WIP" option (accessible from the "..." overflow on the prompt) suppresses all handoff trigger evaluation for 7 days | P1 |
+| P1-6 | Designer confirms via "Start handoff" -> share modal opens pre-populated with Dev Mode access (not view-only) and a required recipient field | P0 |
+| P1-7 | After successful share via the handoff flow, the file displays a "Ready for review" label in the project browser visible to all team members | P0 |
+| P1-8 | "Ready for review" label is automatically removed if the file is edited (any save event) more than 24 hours after the label was applied, unless the designer re-confirms | P1 |
+| P1-9 | Trigger evaluation runs server-side on save events; the inline prompt is served via a WebSocket push, not a client-side poll | P0 |
+| P1-10 | Feature is disabled for files owned by solo accounts (no team) - the trigger requires a team context to have meaning | P0 |
+
+#### Acceptance criteria - Pillar 1
+
+| ID | Scenario | Pass condition |
+|---|---|---|
+| AC-P1-1 | File meets all 4 required signals; no suppression applies | Prompt appears in top bar within 500ms of qualifying save |
+| AC-P1-2 | Designer clicks "Not yet" | Prompt disappears; re-evaluation is suppressed for exactly 72h |
+| AC-P1-3 | Designer clicks "Start handoff"; selects an engineer recipient; submits | File receives "Ready for review" label; `handoff_triggered` event fires; `file_shared` fires with `share_type: dev_mode` |
+| AC-P1-4 | Designer clicks "Start handoff"; closes the share modal without submitting | No label applied; `handoff_triggered` event does NOT fire; prompt re-surfaces on next qualifying save |
+| AC-P1-5 | Engineer opens file within 24h of prompt being shown (suppression condition) | Prompt is suppressed; `handoff_trigger_suppressed` event fires with `reason: engineer_already_present` |
+| AC-P1-6 | File has already had `handoff_triggered` fire previously | Prompt never re-surfaces for this file; suppression is permanent unless designer resets |
+| AC-P1-7 | File is edited 25h after "Ready for review" label is applied | Label is removed; designer receives in-app notification: "Your handoff label was removed because the file was updated. Re-trigger when ready." |
 
 **Edge case 1 - Designer is still iterating:** File meets heuristic criteria (enough frames, no open comments) but work is not actually complete. Mitigation: require explicit confirmation ("Yes, send to engineering") before triggering; suppress re-prompt for 72h; allow "mark as WIP" to disable the trigger for 7 days.
 
 **Edge case 2 - Engineer is already in the file:** If `file_opened_by_non_editor` fired in the last 24h, suppress the trigger - the handoff has already happened informally. Do not introduce friction into an already-working workflow.
+
+**Edge case 3 - File has been cloned or branched:** If the file is a branch of a main file, the trigger should evaluate against the branch content, not the main file's state. The "Ready for review" label on a branch indicates the branch is ready to be reviewed by engineering before merging - not that the main file is ready. Fire `handoff_triggered` with `context: branch` to distinguish in analytics.
 
 ---
 
@@ -152,7 +211,36 @@ Step 3: "Leave a comment if something looks different from what you built."
 - User has completed this overlay in the last 90 days (show at most once per quarter).
 - User explicitly clicked "I know Figma, skip this" (permanent suppression flag on user record).
 
-**Edge case - Experienced engineer who finds this patronising:** Show "I know Figma, skip this" prominently in step 1. One click suppresses permanently. Do not re-show. The overlay should feel like a helpful tooltip for someone who got a link and isn't sure what to do with it - not a tutorial for someone who uses Figma daily.
+#### Functional requirements - Pillar 2
+
+| # | Requirement | Priority |
+|---|---|---|
+| P2-1 | Overlay appears within 2 seconds of first file open; does not block the file canvas from rendering | P0 |
+| P2-2 | "I know Figma, skip this" link is visible in Step 1 without scrolling; click sets `overlay_permanently_dismissed = true` on user record; overlay never shows again | P0 |
+| P2-3 | "Switch to Dev Mode" CTA in Step 1 executes the mode switch immediately in the same tab without closing the overlay | P0 |
+| P2-4 | "Try it" CTA in Step 2 programmatically selects the topmost interactive element in the first frame and opens the code panel; if no frames exist, step 2 is skipped | P1 |
+| P2-5 | Overlay advances to next step automatically if the user takes the suggested action (mode switch, element click, comment open) within 10 seconds | P1 |
+| P2-6 | Overlay state persists through page refresh; if user closes the tab mid-overlay, the overlay resumes at the last incomplete step on next open (within 24h) | P1 |
+| P2-7 | Overlay fires `overlay_shown`, `overlay_step_completed`, and `overlay_dismissed` events with step number, method (action vs. manual advance), and user context | P0 |
+| P2-8 | Overlay is not shown on mobile web - defer to mobile PM for bottom-sheet equivalent; desktop web only for v1 | P0 |
+
+#### Acceptance criteria - Pillar 2
+
+| ID | Scenario | Pass condition |
+|---|---|---|
+| AC-P2-1 | First-ever Figma file open by a user with no editor history | Overlay appears within 2s; canvas is fully rendered behind overlay |
+| AC-P2-2 | User clicks "Switch to Dev Mode" in Step 1 | Dev Mode activates; overlay stays open and advances to Step 2 |
+| AC-P2-3 | User clicks "I know Figma, skip this" | Overlay closes; `overlay_dismissed` fires with `method: permanent_skip`; overlay never shown again for this user |
+| AC-P2-4 | User opens a file with the "Ready for review" label; user has completed the overlay 45 days ago | Overlay shows (less than 90-day suppression window) |
+| AC-P2-5 | User opens a file with the "Ready for review" label; user has completed the overlay 95 days ago | Overlay does NOT show (past 90-day suppression window) |
+| AC-P2-6 | User closes the tab on Step 2; reopens the same file within 24h | Overlay resumes at Step 2 |
+| AC-P2-7 | User is an active editor (>5 editor sessions in last 30d) | Overlay is suppressed; `overlay_suppressed` fires with `reason: active_editor` |
+
+**Edge case 1 - Experienced engineer who finds this patronising:** "I know Figma, skip this" is prominent in Step 1. One click suppresses permanently. The overlay should feel like a helpful tooltip for someone who got a link and isn't sure what to do with it - not a tutorial for someone who uses Figma daily.
+
+**Edge case 2 - File has no frames or only one frame:** Step 2 ("Click any element to copy its code") has no useful target. Skip Step 2 and advance directly from Step 1 to Step 3. Fire `overlay_step_skipped` with `reason: no_interactive_element` for analytics. This prevents a broken "Try it" experience on empty or stub files.
+
+**Edge case 3 - User opens file in Dev Mode directly (via a deep link with `?mode=dev`):** Overlay should skip Step 1 (already in Dev Mode) and start at Step 2. Detect mode on load; adjust overlay entry point accordingly.
 
 ---
 
@@ -172,9 +260,38 @@ Step 3: "Leave a comment if something looks different from what you built."
 - Template injection: adds one line to the PR body - "Design spec: [Figma file - Dev Mode]" - if the field is not already present.
 - This is additive to the PR template; it never overwrites existing content.
 
-**Scope for v1:** Linear and GitHub only. Jira and Notion are explicitly out of scope for v1 (noted as v2 targets in the open questions).
+#### Functional requirements - Pillar 3
 
-**Edge case - File not linked to any Linear issue:** Pillar 3 does not fire. The designer is prompted in the share modal to link to a Linear issue if they want the workflow integration. No forced linking - it is optional and surfaced as a value-add.
+| # | Requirement | Priority |
+|---|---|---|
+| P3-1 | When `handoff_triggered` fires for a file linked to a Linear issue, Figma's Linear integration creates a sub-task within 60 seconds | P0 |
+| P3-2 | Sub-task assignee defaults to the first engineer listed on the Linear issue; if no engineer is listed, the sub-task is unassigned with a label "Needs assignee" | P0 |
+| P3-3 | Sub-task link to Figma uses a deep link that opens the file in Dev Mode (`?mode=dev`), not the default editor mode | P0 |
+| P3-4 | Sub-task auto-closes when both `file_opened_by_non_editor` and `comment_created` (commenter_role: viewer or dev_mode) fire on the linked file within 7 days of sub-task creation | P1 |
+| P3-5 | When a GitHub PR is opened against a branch, Figma checks for a linked Linear issue (via PR body or branch name convention `[LIN-XXX]`) and retrieves any linked Figma file | P0 |
+| P3-6 | If a Figma file is found, inject "Design spec: [file name](Dev Mode URL)" into the PR body as the last line of the description, only if the string "figma.com" is not already present in the PR body | P0 |
+| P3-7 | PR body injection is performed via the GitHub API using the Figma GitHub app's installation token; injection must not modify any existing line - appended only | P0 |
+| P3-8 | If the Figma GitHub app is not installed for the repo, skip injection silently; log `github_injection_skipped` with `reason: app_not_installed` | P0 |
+| P3-9 | Org admins can disable Pillar 3 entirely (Linear or GitHub, independently) in the Figma admin panel; disable takes effect within 5 minutes | P1 |
+| P3-10 | Per-file opt-out: designer can unlink the Linear issue from the handoff flow to prevent sub-task creation for a specific file | P1 |
+
+#### Acceptance criteria - Pillar 3
+
+| ID | Scenario | Pass condition |
+|---|---|---|
+| AC-P3-1 | `handoff_triggered` fires; file is linked to a Linear issue with an assigned engineer | Sub-task created on Linear issue within 60s; sub-task link opens file in Dev Mode |
+| AC-P3-2 | `handoff_triggered` fires; file has no linked Linear issue | No sub-task created; `linear_subtask_skipped` fires with `reason: no_linked_issue` |
+| AC-P3-3 | GitHub PR opened with `[LIN-123]` in the branch name; LIN-123 has a linked Figma file | "Design spec: [file name](Dev Mode URL)" appended to PR body |
+| AC-P3-4 | GitHub PR body already contains "figma.com" | Injection skipped; `github_injection_skipped` fires with `reason: figma_link_present` |
+| AC-P3-5 | Engineer opens file (fires `file_opened_by_non_editor`) and leaves a comment within 7d | Sub-task auto-closes; `linear_subtask_autoclosed` event fires |
+| AC-P3-6 | Engineer opens file but does NOT leave a comment within 7d | Sub-task remains open; no auto-close |
+| AC-P3-7 | Org admin disables Linear integration in admin panel | No sub-tasks created for any new handoff triggers in that org; disable effective within 5 min |
+
+**Edge case 1 - File not linked to any Linear issue:** Pillar 3 does not fire. The designer is prompted in the share modal to link to a Linear issue if they want the workflow integration. Linking is optional - surfaced as a value-add, not required. `linear_subtask_skipped` fires with `reason: no_linked_issue`.
+
+**Edge case 2 - Linear issue has multiple engineers assigned:** Sub-task assignee is the first engineer listed (by Linear's assignment order). If the linear issue has no engineers (only PMs or designers), sub-task is created unassigned with `needs_assignee: true` flag visible in the sub-task description.
+
+**Edge case 3 - PR is opened before the design is marked "Ready for review":** GitHub injection still fires based on the linked Figma file state at PR open time. The file does not need to have a `handoff_triggered` event - the presence of a linked file is sufficient. This handles teams that do their own informal handoff before the formal trigger.
 
 ---
 
@@ -190,17 +307,204 @@ Step 3: "Leave a comment if something looks different from what you built."
 - Grouped by project or team.
 - Maximum 5 files per digest - if more than 5 are pending, show the 5 most recently shared.
 
-**Configuration:**
-- Default: weekly, sent Monday morning in the recipient's timezone.
-- User can change to: daily, bi-weekly, or off.
-- Unsubscribe is prominent and one-click - no confirmation required.
-- If there are zero pending files, no digest is sent that week.
+#### Functional requirements - Pillar 4
 
-**Guardrail:** If the digest unsubscribe rate exceeds 15% in the first 30 days, pause the digest and audit content relevance before re-enabling.
+| # | Requirement | Priority |
+|---|---|---|
+| P4-1 | Digest is computed weekly (Monday 9am in recipient's timezone) by querying `file_shared` events where recipient has no subsequent `file_opened_by_non_editor` or `comment_created` event | P0 |
+| P4-2 | Digest includes a maximum of 5 files per recipient; ranked by recency of `file_shared` event (most recent first) | P0 |
+| P4-3 | Each file entry in the digest renders a thumbnail (first frame of the file, cached at 400x300px) with fallback to a file icon if thumbnail generation fails | P0 |
+| P4-4 | "Review in Dev Mode" CTA uses a deep link that opens the file in Dev Mode; link includes a UTM parameter `utm_source=digest` for attribution | P0 |
+| P4-5 | Unsubscribe link is visible in the email footer; one-click, no confirmation dialog required | P0 |
+| P4-6 | Users can configure digest cadence (weekly, daily, bi-weekly, off) in Notification Preferences; default is weekly | P1 |
+| P4-7 | No digest is sent if a recipient has zero pending files that week | P0 |
+| P4-8 | If the digest unsubscribe rate exceeds 15% in the first 30 days (measured across all recipients), the digest feature is automatically paused pending a content and cadence review | P0 |
+| P4-9 | In-app notification counterpart to the email digest: "3 designs need your review" banner in the Figma home screen, shown on Monday login if the email has not been clicked | P1 |
+
+#### Acceptance criteria - Pillar 4
+
+| ID | Scenario | Pass condition |
+|---|---|---|
+| AC-P4-1 | User has 3 pending design files (shared but not opened) at Monday 9am | Digest email sent; subject: "3 designs are waiting for your review" |
+| AC-P4-2 | User has 0 pending files | No digest sent that week |
+| AC-P4-3 | User has 7 pending files | Digest contains the 5 most recently shared; oldest 2 are excluded |
+| AC-P4-4 | User clicks "Review in Dev Mode" in the digest | File opens in Dev Mode; `digest_cta_clicked` event fires with `utm_source: digest` |
+| AC-P4-5 | User clicks "Unsubscribe" in the email footer | User is unsubscribed immediately; no confirmation required; `digest_unsubscribed` event fires |
+| AC-P4-6 | 30-day unsubscribe rate exceeds 15% | Digest sending is automatically paused; ops team receives an alert |
+
+**Edge case 1 - Designer is also the engineer on the same team:** A user who is both an editor and listed as an engineering reviewer on some files could receive a digest about their own files. Mitigation: suppress digest entries for files where the recipient is the file's primary creator (owner).
+
+**Edge case 2 - Engineer has already reviewed the file via an informal channel (opened from Slack link, but `file_opened_by_non_editor` did not fire due to a tracking gap):** The digest will incorrectly include this file. This is a known limitation of inferring review state from events. Mitigation: add a "Mark as reviewed" action directly in the digest email - a single click that fires `digest_marked_reviewed` and suppresses the file from future digests. No Figma login required to mark as reviewed (use an unguessable token in the URL).
 
 ---
 
-## 5. Key metrics
+## 6. Event schema
+
+All new events introduced by this PRD. Field names use snake_case. Events fire server-side where possible to avoid client-side ad blocker interference.
+
+```json
+// Handoff trigger prompt shown to designer
+{
+  "event": "handoff_trigger_shown",
+  "properties": {
+    "file_id": "string",
+    "team_id": "string",
+    "org_id": "string",
+    "trigger_reason": "frame_count | prototype_connected | comments_resolved | all_criteria_met",
+    "frame_count": "integer",
+    "has_prototype": "boolean",
+    "open_comment_count": "integer",
+    "ts": "ISO8601"
+  }
+}
+```
+
+```json
+// Designer completes the handoff trigger (shares file via the handoff flow)
+{
+  "event": "handoff_triggered",
+  "properties": {
+    "file_id": "string",
+    "team_id": "string",
+    "org_id": "string",
+    "recipient_count": "integer",
+    "recipient_roles": ["dev_mode", "viewer"],
+    "linked_linear_issue": "boolean",
+    "context": "main_file | branch",
+    "ts": "ISO8601"
+  }
+}
+```
+
+```json
+// Handoff trigger prompt suppressed (engineer already present, or repeat trigger)
+{
+  "event": "handoff_trigger_suppressed",
+  "properties": {
+    "file_id": "string",
+    "team_id": "string",
+    "reason": "engineer_already_present | prior_handoff_exists | wip_marked | 72h_cooldown",
+    "ts": "ISO8601"
+  }
+}
+```
+
+```json
+// Engineering onboarding overlay shown
+{
+  "event": "overlay_shown",
+  "properties": {
+    "file_id": "string",
+    "user_id": "string",
+    "trigger_reason": "first_ever_open | lapsed_90d | ready_for_review_file",
+    "starting_step": "integer",
+    "ts": "ISO8601"
+  }
+}
+```
+
+```json
+// Overlay step completed or skipped
+{
+  "event": "overlay_step_completed",
+  "properties": {
+    "file_id": "string",
+    "user_id": "string",
+    "step_number": "integer",
+    "method": "action_taken | manual_advance | auto_advance",
+    "skipped": "boolean",
+    "skip_reason": "string | null",
+    "ts": "ISO8601"
+  }
+}
+```
+
+```json
+// Overlay dismissed at any step
+{
+  "event": "overlay_dismissed",
+  "properties": {
+    "file_id": "string",
+    "user_id": "string",
+    "dismissed_at_step": "integer",
+    "method": "close_button | permanent_skip | completed_all_steps",
+    "ts": "ISO8601"
+  }
+}
+```
+
+```json
+// Linear sub-task created for design review
+{
+  "event": "linear_subtask_created",
+  "properties": {
+    "file_id": "string",
+    "linear_issue_id": "string",
+    "subtask_id": "string",
+    "assignee_present": "boolean",
+    "ts": "ISO8601"
+  }
+}
+```
+
+```json
+// Linear sub-task auto-closed after engineer review
+{
+  "event": "linear_subtask_autoclosed",
+  "properties": {
+    "file_id": "string",
+    "subtask_id": "string",
+    "days_to_close": "integer",
+    "triggered_by": "file_opened_and_commented",
+    "ts": "ISO8601"
+  }
+}
+```
+
+```json
+// GitHub PR description injection
+{
+  "event": "github_pr_injected",
+  "properties": {
+    "file_id": "string",
+    "repo_id": "string",
+    "pr_number": "integer",
+    "linear_issue_id": "string",
+    "ts": "ISO8601"
+  }
+}
+```
+
+```json
+// Digest email sent
+{
+  "event": "digest_sent",
+  "properties": {
+    "recipient_user_id": "string",
+    "file_count": "integer",
+    "cadence": "daily | weekly | biweekly",
+    "ts": "ISO8601"
+  }
+}
+```
+
+```json
+// Digest CTA clicked
+{
+  "event": "digest_cta_clicked",
+  "properties": {
+    "recipient_user_id": "string",
+    "file_id": "string",
+    "days_since_share": "integer",
+    "utm_source": "digest",
+    "ts": "ISO8601"
+  }
+}
+```
+
+---
+
+## 7. Key metrics
 
 ### North Star metric
 
@@ -216,11 +520,12 @@ Step 3: "Leave a comment if something looks different from what you built."
 |---|---|---|---|---|
 | % of new files receiving a "Ready for review" label | `handoff_triggered` | ~0% (feature doesn't exist) | >40% of files with >= 3 frames | 1 |
 | Engineer first Dev Mode session rate within 30 days | `devmode_session_started` after `file_opened_by_non_editor` | ~30% | >45% | 1 + 2 |
-| `devmode_session_started` on first-ever file open by engineer | Rate among users with `is_first_figma_open = true` | ~20% | >50% | 2 |
-| Engineer comment rate on design files within 14 days | `comment_created` with `commenter_role = viewer or dev_mode` | ~15% | >25% | 1 + 3 |
+| `devmode_session_started` on first-ever file open by engineer | Rate among users with `trigger_reason: first_ever_open` in overlay | ~20% | >50% | 2 |
+| Engineer comment rate on design files within 14 days | `comment_created` with `commenter_role: viewer or dev_mode` | ~15% | >25% | 1 + 3 |
 | P50 time from `file_shared` to `file_opened_by_non_editor` | Time delta between events | >48h | <6h | 3 |
 | Digest email open rate | Email analytics | N/A (new) | >25% | 4 |
-| Linear "Design review" sub-task completion rate | Sub-task closed with `comment_created` present | N/A (new) | >60% of auto-created sub-tasks | 3 |
+| Linear "Design review" sub-task completion rate | `linear_subtask_autoclosed` / `linear_subtask_created` | N/A (new) | >60% | 3 |
+| Overlay completion rate (all 3 steps) | `overlay_dismissed` with `method: completed_all_steps` | N/A (new) | >40% of overlays shown | 2 |
 
 ### Guardrail metrics
 
@@ -230,10 +535,89 @@ Step 3: "Leave a comment if something looks different from what you built."
 | Digest unsubscribe rate in first 30 days | Must not exceed 15% - trigger a content/cadence review if breached | Digest is additive value, not notification spam |
 | `file_shared` rate per designer per week | Must not decline - new prompts should not create friction that reduces sharing | If designers share less, the funnel narrows regardless of downstream improvements |
 | Designer NPS for the share flow (in-product survey, n >= 200) | Must not decline >5 points vs. pre-launch baseline | Designer sentiment protects the top of the funnel |
+| `handoff_trigger_shown` -> `handoff_triggered` conversion rate | Must reach >35% within 30 days of launch | If < 35%, prompt copy or placement requires iteration |
 
 ---
 
-## 6. Key risks
+## 8. Competitive analysis
+
+| Competitor | Their handoff model | Where they win | Figma's gap vs. them | Figma's structural advantage |
+|---|---|---|---|---|
+| **Zeplin** | Dedicated handoff tool; engineers get a separate inspection app with annotations, styleguides, and comment threads; PM defines "section" which maps to a feature | Purpose-built engineer-first UI; sections model makes each handoff an explicit workflow unit with its own review state; engineers treat Zeplin as the spec home, not a design tool they're visiting | Zeplin has explicit "handoff" as a first-class concept; a Zeplin section can be approved, pending, or needs changes; Figma has no equivalent state machine | Figma owns the design file - Zeplin requires a sync step and a second tool. Fixing the handoff trigger closes most of the gap without requiring a separate URL. Teams can stay in one product. |
+| **Notion + Figma embed** | PMs embed Figma prototypes in Notion specs; engineers read the spec doc with the Figma embed as a secondary artefact | Context-rich: the Notion doc has the why (problem, goals, metrics) and the what (Figma embed); engineers can comment on the Notion doc without ever opening Figma | Figma has the design but not the context; Notion has the context but not the inspectable design; the Figma embed is view-only with no Dev Mode | Pillar 3's Linear integration creates a Notion-equivalent "context layer" inside the engineering workflow (Linear), without requiring a PM to manually embed or maintain a separate document. |
+| **Storybook / Code Connect** | Engineers review component behaviour in code; design-to-code link is established post-build | Post-build review catches production gaps; Storybook is trusted by engineering because it is the real component | Storybook is post-build (when it's too late to change the design); Figma Dev Mode + Code Connect is pre-build spec but the loop rarely closes unless engineers already know Dev Mode | Dev Mode + Code Connect is the bridge between design spec and production code. Pillar 2 activates engineers in Dev Mode before the Storybook habit forms - the sequence matters. |
+| **Linear + screenshots (status quo)** | Teams paste screenshots of Figma frames into Linear comments as the handoff artefact | Zero friction for the designer; screenshot in Linear is immediately visible to engineers in their existing workflow | Screenshots degrade: they go stale when the design changes; have no inspection layer; don't link back to the source of truth | Pillar 3 replaces the screenshot paste with a live Dev Mode link inside the same Linear ticket. No extra tool, no new URL to remember - the link is in the ticket the engineer already has open. |
+| **Figma's own DevMode (current free tier)** | Engineers get free inspection access but no workflow integration; they know Dev Mode only if the designer or a colleague told them about it | Free; no seat purchase needed; powerful inspection when the engineer finds it | Dev Mode adoption is organic and accidental; there is no systematic product motion that tells engineers "this exists and you should use it for this file" | Pillar 2 is the product motion. This PRD activates Dev Mode through the onboarding overlay rather than expecting engineers to discover it on their own. |
+
+**Win condition vs. Zeplin:** Figma wins if the handoff trigger + "Ready for review" label makes the Figma workflow feel as intentional as Zeplin's sections model, without requiring a tool switch. If Figma can own the "design is ready" moment, Zeplin's reason for existing weakens.
+
+**Loss condition vs. Zeplin:** Figma loses if the review-ready heuristic fires too frequently (false positives) and designers stop trusting it. If the prompt becomes noise, designers will continue to use informal Slack links - and Zeplin's explicit "publish to Zeplin" workflow will feel more controlled.
+
+**Win condition vs. Linear + screenshots:** Pillar 3 wins if the GitHub PR injection and Linear sub-task creation reach >60% task-completion rate within 90 days. If engineers close the design review sub-task with a comment in Figma, the loop is closed - screenshots become demonstrably inferior.
+
+**Loss condition vs. Linear + screenshots:** Pillar 3 loses if the Linear sub-task is perceived as PM micromanagement of engineering review. If engineers mark the sub-task "done" without actually opening the Figma file, the metric is gamed and the underlying problem persists.
+
+---
+
+## 9. Experiment backlog
+
+| Experiment | Hypothesis | Primary metric | Guardrail | Priority | Minimum detectable effect | Power |
+|---|---|---|---|---|---|---|
+| Review-ready prompt placement: top bar vs. right panel | Top bar placement has higher designer visibility but may feel more intrusive than a right-panel nudge | `handoff_trigger_shown` -> `handoff_triggered` conversion rate | `time_to_first_frame` must not increase | P0 - required before GA | 5pp conversion difference | 80% at n=2,000 per arm |
+| Overlay with "Switch to Dev Mode" CTA vs. text-only tooltip | Interactive CTA (executes mode switch) drives higher Dev Mode adoption than a text tooltip that describes Dev Mode | `devmode_session_started` within first 10 min of file open for overlay cohort vs. control | `overlay_dismissed` with `method: permanent_skip` rate must not exceed 30% | P0 - required before GA | 10pp Dev Mode activation difference | 80% at n=1,000 per arm |
+| Linear sub-task creation: always-on vs. opt-in | Always-on sub-task creation drives higher `file_opened_by_non_editor_within_7d` rate vs. opt-in which reaches fewer engineers | `file_opened_by_non_editor_within_7d_rate` for Linear-linked files | Linear issue comment rate must not decline (sub-task must not create noise) | P1 | 8pp open-rate difference | 80% at n=1,500 per arm |
+| Digest cadence: weekly vs. twice-weekly | Twice-weekly digest drives higher `file_opened_by_non_editor` rate by reducing time between share and re-engagement | `digest_cta_clicked` rate per digest sent | Unsubscribe rate must stay <15% | P1 | 3pp click-rate difference | 80% at n=3,000 per arm |
+| Dev Mode deep link vs. editor link in digest CTA | Deep links to Dev Mode drive higher `devmode_session_started` rate than links to editor mode (which is the default) | `devmode_session_started` within 5 min of digest CTA click | `file_opened_by_non_editor` rate must not decline (deep link must not break file access) | P0 | 15pp Dev Mode session rate difference | 80% at n=800 per arm |
+| "Ready for review" label visibility: project browser only vs. project browser + in-file top bar | Showing the label in the file top bar as well as the project browser increases engineer awareness and reduces time-to-first-open | P50 time from `handoff_triggered` to `file_opened_by_non_editor` | Designer edit flow duration must not increase | P2 | 4h P50 time difference | 80% at n=1,000 files |
+
+---
+
+## 10. Dependency map
+
+| Pillar | Dependency | Owner | Blocking? | Risk |
+|---|---|---|---|---|
+| Pillar 1 (review-ready trigger) | Figma file save event pipeline (server-side) | Platform infra | Yes | Event volume at scale; trigger evaluation must not introduce save latency |
+| Pillar 1 | Share modal redesign (Dev Mode default, recipient required field) | Design | Yes | PM/Design alignment on share modal changes |
+| Pillar 2 (overlay) | Dev Mode entry point API (programmatic mode switch) | Dev Mode team | Yes | Dev Mode team owns the mode toggle; cross-team coordination required |
+| Pillar 2 | User attribute store (overlay suppression flags) | Identity/auth team | Yes | Requires `overlay_permanently_dismissed` and `overlay_last_shown_at` fields on user record |
+| Pillar 3 (Linear integration) | Existing Figma-Linear integration (v2 of the integration) | Partnerships/integrations | Yes | Sub-task creation requires Linear webhook capability; must validate with Linear's API |
+| Pillar 3 (GitHub integration) | GitHub App for Figma (PR body write permissions) | Partnerships/integrations | Yes | Figma's GitHub app must have `pull_requests: write` scope; may require users to re-authorize the app |
+| Pillar 4 (digest) | Email delivery infrastructure (transactional email) | Growth/comms infra | Yes | Requires suppression list management and bounce handling |
+| Pillar 4 | Thumbnail generation service (first frame as image) | Media/rendering | No | Fallback to file icon if thumbnail fails; not blocking |
+| All pillars | Event pipeline and analytics warehouse | Data infra | No | Analytics are required for experiment measurement but not for feature function |
+
+---
+
+## 11. Rollout plan
+
+### Phase 0 - Internal dogfood (weeks 1-4)
+
+**Scope:** Figma's own product and design teams only.
+**Goal:** Validate that heuristic trigger does not interrupt design flow; validate that overlay renders correctly across file types.
+**Success gate:** 0 designer-reported interruptions to design flow from the trigger prompt; overlay shown rate >80% of qualifying first-opens.
+
+### Phase 1 - Closed beta, 5% of Professional teams (weeks 5-10)
+
+**Scope:** 5% of Professional-tier teams randomised by team ID.
+**Goal:** Measure `file_opened_by_non_editor_within_7d_rate` lift vs. holdout; validate digest unsubscribe rates below 15%.
+**Success gate:** >5pp lift in open rate vs. holdout; digest unsubscribe rate <15%; no significant increase in time-to-first-frame.
+**Kill switch:** Per-org feature flag; can disable any or all pillars independently in <5 minutes.
+
+### Phase 2 - Expansion, 25% of Professional and Organisation tiers (weeks 11-16)
+
+**Scope:** 25% of Professional and Organisation tier teams.
+**Goal:** Validate at scale; run A/B experiments on prompt placement and overlay CTA variant.
+**Success gate:** P50 time from `file_shared` to `file_opened_by_non_editor` drops below 12h (interim target on path to 6h); designer NPS for share flow does not decline more than 3 points.
+
+### Phase 3 - GA, all Professional and Organisation tiers (weeks 17+)
+
+**Scope:** All Professional and Organisation tiers. Free tier gets Pillar 2 only (overlay) - no trigger, no integrations, no digest.
+**Goal:** Drive `file_opened_by_non_editor_within_7d_rate` from 35% to 50% by end of Q2 post-GA.
+**Monitoring:** Weekly metrics review; automated alert if `file_shared` rate declines >3% week-over-week.
+
+---
+
+## 12. Key risks
 
 | Risk | Likelihood | Severity | Mitigation |
 |---|---|---|---|
@@ -243,30 +627,40 @@ Step 3: "Leave a comment if something looks different from what you built."
 | Digest email contributes to notification fatigue and increases unsubscribe rate from all Figma emails | Medium | High | Weekly default (not daily); aggressive unsubscribe UX; strict volume cap at 5 files per digest; pause if unsubscribe rate > 15% |
 | Dev Mode paid tier is introduced before engineers build an engagement habit | High | High | Engineering activation (`devmode_session_started` rate > 40% for engineering teams) must be a prerequisite gate before any Dev Mode paid tier launch |
 | Pillar 3 scope creep into project management territory (competing with Linear) | Low | High | Strict non-goal enforcement: Figma creates one sub-task and one PR annotation, nothing more. No sprint boards, no issue creation, no status sync beyond the design review event. |
+| GitHub PR body injection fails silently for repos using strict PR template enforcement | Medium | Medium | Pre-check for PR template validation rules before injecting; if template enforcement detected, skip injection and log `github_injection_skipped` with `reason: template_enforcement` |
 
 ---
 
-## 7. Competitive context
+## 13. Open questions - resolved from v1
 
-| Competitor | Their handoff model | Figma's gap vs. them | Figma's advantage |
-|---|---|---|---|
-| Zeplin | Dedicated handoff tool; engineers get a separate inspection app with annotations, styleguides, and comment threads | Zeplin has a purpose-built engineer-first UI; its "project" model makes design-to-engineering handoff an explicit workflow step | Figma has the design file - Zeplin requires a sync step. Fixing the handoff trigger closes most of the gap without requiring a separate tool. |
-| Notion + Figma embed | PMs embed Figma prototypes in Notion specs; engineers read the spec doc | The design source of truth is fragmented - Notion has the context, Figma has the design | Figma's Linear integration creates the same "spec-adjacent" surface inside the engineering workflow tool, without requiring a PM to manually embed |
-| Storybook / Code Connect | Engineers review component behaviour in code, not in design | Storybook is post-build review; Figma is pre-build spec. These should be complementary but feel disconnected | Dev Mode + Code Connect is the bridge - but only if engineers are first activated in Figma before the Storybook habit forms |
-| Linear + screenshots | Teams paste screenshots of Figma frames into Linear comments as the handoff artefact | Absolutely the status quo for many teams - screenshots degrade in resolution, go stale, and have no inspection layer | The Pillar 3 Linear integration replaces the screenshot with a live Dev Mode link inside the same Linear ticket |
+**Q1: What is the actual `file_opened_by_non_editor_within_7d_rate` baseline today?**
+
+Decision: The 35% estimate is the working baseline for experiment power calculations. Instrument `file_opened_by_non_editor` with a `days_since_file_created` field. In Phase 0 dogfood, measure the actual rate against the holdout. If actual baseline differs materially from 35% (e.g., >45% or <25%), re-run experiment power calculations before Phase 1 launch. A higher baseline means a harder uplift target; a lower baseline means more room for improvement and a potentially easier success gate.
+
+**Q2: Does the Figma-Linear integration already support sub-task creation?**
+
+Decision: The current Figma-Linear integration (as of 2025) supports file-to-issue linking and syncs design file thumbnails into Linear issues. Sub-task creation is net-new functionality requiring the Figma integration to make a Linear API call via the Linear GraphQL `createIssue` mutation with the parent issue ID. This is feasible with Linear's API but requires a partnership engineering allocation. Estimated effort: 3-4 weeks of integration work. Confirmed as a blocking dependency for Pillar 3.
+
+**Q3: What is the P50 time from `file_shared` to `file_opened_by_non_editor` in the current dataset?**
+
+Decision: Treat >48h as the working baseline for the P50 time metric. Instrument this delta from Phase 0 dogfood. If actual P50 is already <24h for a subset of teams (e.g., teams already using Linear), Pillar 3 should focus on the segment where P50 is >48h - likely teams using Slack-only sharing - where the impact is highest.
+
+**Q4: Is there a meaningful difference in activation rate between named-recipient shares vs. link-only shares?**
+
+Decision: Hypothesis is yes - named-recipient shares likely have >50% 7-day open rate while link-only shares are below 20%. Instrument `file_shared` with `share_type: named_recipient | link_only`. If the hypothesis is confirmed, Pillar 1's explicit recipient requirement in the handoff share modal is the highest-leverage intervention (shifting shares from link-only to named-recipient). If the hypothesis is wrong (open rates are similar), the focus shifts entirely to meeting engineers in their workflow (Pillar 3) regardless of share type.
+
+**Q5: What % of engineering teams with an active Figma file have ever initiated a Dev Mode session?**
+
+Decision: The ~30% estimate is the working baseline for Pillar 2 targeting. Phase 0 dogfood will instrument `devmode_session_started` cohorted by `file_opened_by_non_editor` trigger reason. If >50% of engineers who open a "Ready for review" file already initiate Dev Mode without the overlay, Pillar 2's target cohort narrows to first-time Figma users only - and the overlay does not need to show for experienced engineers opening labelled files.
+
+**Q6: Can the review-ready detection heuristic be validated before building the full trigger system?**
+
+Decision: Yes. Before building the server-side trigger, run a manual audit on a sample of 50 design files where `devmode_session_started` fired within 7 days of file creation. Apply the heuristic retroactively: how many of those files would have qualified as "review-ready" by the heuristic? If >70% of files that led to an engineering session qualified under the heuristic, the signal is validated. If <50% qualified, the heuristic needs additional signals (e.g., design annotation layer present, component coverage >80%) before building the trigger.
+
+**Q7: Is there a Jira integration roadmap for Pillar 3?**
+
+Decision: Jira is in scope for v2 of Pillar 3, not v1. Jira's API is more complex (project/issue hierarchy, multiple auth models), and the Figma-Jira integration surface is thinner than Figma-Linear. v1 targets Linear-first because Linear is the primary project management tool for product-led companies (Figma's core customer segment). Jira coverage is tracked as a follow-on item post-GA.
 
 ---
 
-## 8. Open questions (v1)
-
-1. What is the actual `file_opened_by_non_editor_within_7d_rate` baseline today? The 35% estimate is inferred from retention correlation data; internal Figma analytics would set a precise baseline and determine how aggressive a 50% target is.
-2. Does the existing Figma-Linear integration already support the "ready for review" sub-task creation, or is this net-new infrastructure?
-3. What is the P50 time from `file_shared` to `file_opened_by_non_editor` in the current dataset? This directly determines whether Pillar 3 (meeting engineers in their tools) or Pillar 4 (digest re-engagement) is the higher-leverage bet.
-4. Is there a meaningful difference in activation rate between files shared with a specific named recipient vs. files shared via "anyone with the link"? If named-recipient shares already activate at >50%, the problem is concentrated in link-only shares.
-5. What % of engineering teams with an active Figma file have ever initiated a Dev Mode session? If this is already >50%, Pillar 2's target needs to be re-baselined.
-6. Can the review-ready detection heuristic be validated with a lightweight user study (5-10 designer pairs reviewed with the heuristic applied to their real files) before building the full trigger system?
-7. Is there a Jira integration roadmap that would allow Pillar 3 to cover the significant segment of engineering teams not using Linear?
-
----
-
-*All baselines are directional estimates inferred from public Figma retention research, teardown analysis, and industry benchmarks. Internal Figma analytics should be used to validate or correct these before v2 requirements are finalised.*
+*All baselines are directional estimates inferred from public Figma retention research, teardown analysis, and industry benchmarks. Internal Figma analytics should be used to validate or correct these before v3 requirements are finalised.*
