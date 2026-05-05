@@ -1,7 +1,7 @@
 # Figma PRD: Engineering Review Activation - Closing the Cross-Functional Handoff Gap
 
-**Version:** v2 - Improved PRD
-**Changes from v1:** Added detailed activation funnel analysis with stage-level drop-off data, full functional requirements and acceptance criteria per pillar, expanded event schema with all new events, competitive analysis with specific win/loss reasons, experiment backlog with hypotheses and metrics, per-feature edge case depth, dependency map, instrumentation spec, and resolved open questions from v1.
+**Version:** v3 - Final PRD
+**Changes from v2:** Added explicit launch gates and kill switches per pillar, full instrumentation spec aligned to each rollout phase, SLO revision history, resolved open questions from v2 (baseline validation decisions, Jira roadmap, share-type hypothesis confirmation path), added post-GA monitoring cadence and incident response triggers, updated version history table.
 **Source teardown:** figma-teardown.md (v3)
 **Lens:** Product Manager - scope is the designer-to-engineer handoff activation problem
 
@@ -13,6 +13,7 @@
 |---|---|
 | v1 | Core problem thesis, user segments, activation funnel analysis, solution pillars, success metrics, non-goals, open questions, key risks |
 | v2 | Detailed funnel breakdown, functional requirements + acceptance criteria per pillar, full event schema, experiment backlog, competitive analysis with specific win/loss, edge cases per feature, dependency map, instrumentation spec, resolved open questions |
+| v3 | Explicit launch gates and kill switches per pillar, full instrumentation spec aligned to rollout phases, SLO revision history, resolved open questions from v2, post-GA monitoring cadence, incident response triggers |
 
 ---
 
@@ -543,7 +544,7 @@ All new events introduced by this PRD. Field names use snake_case. Events fire s
 
 | Competitor | Their handoff model | Where they win | Figma's gap vs. them | Figma's structural advantage |
 |---|---|---|---|---|
-| **Zeplin** | Dedicated handoff tool; engineers get a separate inspection app with annotations, styleguides, and comment threads; PM defines "section" which maps to a feature | Purpose-built engineer-first UI; sections model makes each handoff an explicit workflow unit with its own review state; engineers treat Zeplin as the spec home, not a design tool they're visiting | Zeplin has explicit "handoff" as a first-class concept; a Zeplin section can be approved, pending, or needs changes; Figma has no equivalent state machine | Figma owns the design file - Zeplin requires a sync step and a second tool. Fixing the handoff trigger closes most of the gap without requiring a separate URL. Teams can stay in one product. |
+| **Zeplin** | Dedicated handoff tool; engineers get a separate inspection app with annotations, styleguides, and comment threads; PM defines "section" which maps to a feature | Purpose-built engineer-first UI; sections model makes each handoff an explicit workflow unit with its own review state; engineers treat Zeplin as the spec home, not a design tool they're visiting | Zeplin has explicit "handoff" as a first-class concept; a Zeplin section can be approved, pending, or needs changes; Figma has no equivalent state machine | Figma owns the design file - Zeplin requires a sync step and a second tool. Fixing the handoff trigger closes most of the gap without requiring a tool switch. Teams can stay in one product. |
 | **Notion + Figma embed** | PMs embed Figma prototypes in Notion specs; engineers read the spec doc with the Figma embed as a secondary artefact | Context-rich: the Notion doc has the why (problem, goals, metrics) and the what (Figma embed); engineers can comment on the Notion doc without ever opening Figma | Figma has the design but not the context; Notion has the context but not the inspectable design; the Figma embed is view-only with no Dev Mode | Pillar 3's Linear integration creates a Notion-equivalent "context layer" inside the engineering workflow (Linear), without requiring a PM to manually embed or maintain a separate document. |
 | **Storybook / Code Connect** | Engineers review component behaviour in code; design-to-code link is established post-build | Post-build review catches production gaps; Storybook is trusted by engineering because it is the real component | Storybook is post-build (when it's too late to change the design); Figma Dev Mode + Code Connect is pre-build spec but the loop rarely closes unless engineers already know Dev Mode | Dev Mode + Code Connect is the bridge between design spec and production code. Pillar 2 activates engineers in Dev Mode before the Storybook habit forms - the sequence matters. |
 | **Linear + screenshots (status quo)** | Teams paste screenshots of Figma frames into Linear comments as the handoff artefact | Zero friction for the designer; screenshot in Linear is immediately visible to engineers in their existing workflow | Screenshots degrade: they go stale when the design changes; have no inspection layer; don't link back to the source of truth | Pillar 3 replaces the screenshot paste with a live Dev Mode link inside the same Linear ticket. No extra tool, no new URL to remember - the link is in the ticket the engineer already has open. |
@@ -594,26 +595,88 @@ All new events introduced by this PRD. Field names use snake_case. Events fire s
 
 **Scope:** Figma's own product and design teams only.
 **Goal:** Validate that heuristic trigger does not interrupt design flow; validate that overlay renders correctly across file types.
-**Success gate:** 0 designer-reported interruptions to design flow from the trigger prompt; overlay shown rate >80% of qualifying first-opens.
+
+**Launch gate - exit Phase 0:**
+- Zero designer-reported interruptions to design flow from the trigger prompt (tracked via internal feedback channel).
+- Overlay shown rate >80% of qualifying first-opens (measured against internal usage logs).
+- `handoff_trigger_shown` -> `handoff_triggered` conversion rate >25% in internal cohort (lower bar than GA target; internal team is aware of the feature).
+- P1-9 server-side push latency confirmed <200ms on internal load.
+
+**Kill switches active:**
+- Per-file feature flag: any Figma engineer can toggle off the trigger for a specific file in <1 minute.
+- Pillar 2 overlay can be disabled globally via ops config without a code deploy.
+
+**Do not proceed if:** Trigger prompt fires on files that the internal team classifies as WIP in a post-hoc review of 20+ trigger events. Re-evaluate heuristic thresholds before Phase 1.
+
+---
 
 ### Phase 1 - Closed beta, 5% of Professional teams (weeks 5-10)
 
-**Scope:** 5% of Professional-tier teams randomised by team ID.
+**Scope:** 5% of Professional-tier teams randomised by team ID. Holdout: 5% of Professional teams receiving no treatment (pure control). Remaining 90%: no exposure.
+
 **Goal:** Measure `file_opened_by_non_editor_within_7d_rate` lift vs. holdout; validate digest unsubscribe rates below 15%.
-**Success gate:** >5pp lift in open rate vs. holdout; digest unsubscribe rate <15%; no significant increase in time-to-first-frame.
-**Kill switch:** Per-org feature flag; can disable any or all pillars independently in <5 minutes.
+
+**Launch gate - exit Phase 1 to Phase 2:**
+
+| Gate | Target | Measurement window |
+|---|---|---|
+| `file_opened_by_non_editor_within_7d_rate` lift vs. holdout | >5pp absolute lift | Week 6-10 (after 4 weeks of exposure) |
+| Digest unsubscribe rate | <15% of digest recipients | First 30 days of digest sending |
+| Designer NPS for share flow (in-product survey, n >= 100) | Not decline >5 points vs. pre-launch baseline | Weeks 8-10 |
+| `file_shared` rate per designer per week in treatment vs. holdout | Must not decline >2pp | Week 6-10 |
+| P1-9 trigger push latency P99 | <500ms | Continuous monitoring weeks 5-10 |
+
+**Per-pillar kill switches:**
+
+| Pillar | Kill switch condition | Action |
+|---|---|---|
+| Pillar 1 (trigger) | `handoff_trigger_shown` rate exceeds 3x per file per week in any team cohort (false-positive flood) | Disable trigger evaluation for that team; ops alert within 15 min |
+| Pillar 2 (overlay) | `overlay_dismissed` with `method: permanent_skip` rate exceeds 40% of overlays shown | Pause overlay; review copy and placement before resuming |
+| Pillar 3 (Linear) | Linear API error rate for sub-task creation exceeds 5% over any 1-hour window | Disable Linear sub-task creation; switch to silent logging mode; alert integrations team |
+| Pillar 3 (GitHub) | GitHub PR injection failure rate exceeds 3% (failed API calls / total injection attempts) | Disable GitHub injection; log `github_injection_disabled` with reason |
+| Pillar 4 (digest) | Unsubscribe rate exceeds 15% within first 14 days of sending | Auto-pause digest sending; alert growth ops; do not resume without content review |
+
+**Rollback procedure:** All four pillars can be disabled independently via ops config flags. No code deploy required. Estimated time to full rollback for any single pillar: <5 minutes. Full rollback of all pillars: <10 minutes.
+
+---
 
 ### Phase 2 - Expansion, 25% of Professional and Organisation tiers (weeks 11-16)
 
-**Scope:** 25% of Professional and Organisation tier teams.
+**Scope:** 25% of Professional and Organisation tier teams. A/B experiments for prompt placement and overlay CTA variant run within this cohort.
+
 **Goal:** Validate at scale; run A/B experiments on prompt placement and overlay CTA variant.
-**Success gate:** P50 time from `file_shared` to `file_opened_by_non_editor` drops below 12h (interim target on path to 6h); designer NPS for share flow does not decline more than 3 points.
+
+**Launch gate - exit Phase 2 to Phase 3:**
+
+| Gate | Target | Measurement window |
+|---|---|---|
+| P50 time from `file_shared` to `file_opened_by_non_editor` | <12h (interim target on path to 6h) | Weeks 13-16 |
+| Designer NPS for share flow (n >= 200) | Not decline >3 points vs. pre-launch baseline | Weeks 13-16 |
+| `file_opened_by_non_editor_within_7d_rate` trend | Consistent week-over-week increase in treatment cohort vs. holdout | Weeks 11-16 (trend, not point-in-time) |
+| Pillar 3 Linear sub-task completion rate | >50% (sub-tasks auto-closed within 7d of creation) | Weeks 13-16 |
+| P0 experiments concluded | Both Phase-1-required experiments (prompt placement + overlay CTA) have conclusive results | Before Phase 3 launch |
+
+**Additional kill switch - Phase 2 only:**
+- If `file_shared` rate declines >3% week-over-week for 2 consecutive weeks in the treatment cohort vs. holdout, pause Pillar 1 trigger expansion and investigate. This is the canary metric for designer friction.
+
+---
 
 ### Phase 3 - GA, all Professional and Organisation tiers (weeks 17+)
 
 **Scope:** All Professional and Organisation tiers. Free tier gets Pillar 2 only (overlay) - no trigger, no integrations, no digest.
-**Goal:** Drive `file_opened_by_non_editor_within_7d_rate` from 35% to 50% by end of Q2 post-GA.
-**Monitoring:** Weekly metrics review; automated alert if `file_shared` rate declines >3% week-over-week.
+
+**Why Free tier gets Pillar 2 only:** Free tier files are disproportionately solo projects or prototypes - the cross-functional handoff problem is less acute. Pillar 2 (overlay) benefits any engineer opening any file and costs nothing to extend. Pillars 1, 3, and 4 require team context and integration setup, which is a poor fit for Free tier solo accounts.
+
+**GA monitoring cadence:**
+- Weekly: `file_opened_by_non_editor_within_7d_rate` vs. pre-launch baseline; digest unsubscribe rate; `file_shared` rate per designer.
+- Monthly: Designer NPS for share flow; P50 time from `file_shared` to `file_opened_by_non_editor`; Linear sub-task completion rate.
+- Quarterly: Full A/B experiment review; North Star metric progress vs. 50% target; SLO compliance check.
+
+**Incident response triggers (post-GA):**
+- If `file_shared` rate drops >5% relative in any 7-day rolling window vs. 4-week pre-launch average: P1 incident, Pillar 1 disable within 30 minutes.
+- If digest unsubscribe rate climbs above 20% in any 14-day window: auto-pause digest, P2 incident.
+- If `handoff_trigger_shown` fires >5x per file per week for any org cohort: P1 incident, trigger rate-limiting deployed within 2 hours.
+- If Linear API sub-task creation error rate exceeds 10% for 30 consecutive minutes: auto-disable Pillar 3 Linear integration, P1 alert.
 
 ---
 
@@ -663,4 +726,116 @@ Decision: Jira is in scope for v2 of Pillar 3, not v1. Jira's API is more comple
 
 ---
 
-*All baselines are directional estimates inferred from public Figma retention research, teardown analysis, and industry benchmarks. Internal Figma analytics should be used to validate or correct these before v3 requirements are finalised.*
+## 14. Open questions - resolved from v2
+
+**Q8: Should the 35% baseline be validated before setting Phase 1 success gates?**
+
+Decision: Yes - the 35% baseline is directional and based on public teardown inference, not internal Figma data. Phase 0 must produce an actual measured baseline for Professional-tier teams before Phase 1 success gates are locked. The Phase 1 gate of ">5pp lift vs. holdout" is robust to a range of actual baselines (works whether actual is 25% or 45%), but if the actual baseline is already above 48%, the 50% target requires re-scoping to a relative lift goal (e.g., +10% relative) rather than an absolute target.
+
+**Q9: What happens if the share-type hypothesis (Q4) is disproved - named vs. link-only open rates are similar?**
+
+Decision: If Phase 1 data shows that named-recipient and link-only shares have equivalent 7-day open rates (within 3pp), Pillar 1's recipient-required field in the handoff modal becomes lower-priority UX friction with no proven benefit. In that case, remove the required field in Phase 2 and shift the modal focus to Dev Mode access default (which remains valuable regardless of share type). Retain the `share_type` instrumentation for longitudinal analysis.
+
+**Q10: Does Pillar 2 (overlay) show a meaningful retention difference between engineers who complete all 3 steps vs. those who dismiss at Step 1?**
+
+Decision: Instrument this as a cohort split from Phase 1 onward. Track `devmode_session_started` rate within 7 days of file open for three cohorts: (a) overlay completed all 3 steps, (b) overlay dismissed at step 1-2, (c) control (no overlay). If cohort (a) shows >15pp higher `devmode_session_started` rate vs. cohort (b), the overlay is delivering meaningful behaviour change - not just exposure. If cohorts (a) and (b) are within 5pp, the overlay's step sequence adds minimal value over mere exposure to any overlay, and a simplified 1-step version should be tested in Phase 2.
+
+**Q11: What is the right auto-close logic for the Linear sub-task if the engineer opens the file but leaves no comment?**
+
+Decision: Do not auto-close on file open alone. The sub-task closes only when both `file_opened_by_non_editor` AND `comment_created` fire on the linked file within 7 days. This maintains the signal integrity of the "review complete" event - an engineer who opens and immediately closes the file without engaging has not completed the review. The 7-day window balances urgency (engineers should review promptly) against sprint realities (7 days covers a typical sprint cycle). If the auto-close rate for "opened + commented within 7d" falls below 40%, shorten the window to 5 days and measure again.
+
+**Q12: Should the digest "Mark as reviewed" token-in-URL approach be scoped out of v1 due to security concerns?**
+
+Decision: The unguessable token approach is acceptable for v1. The token grants a single action (suppress a specific file from future digests for a specific user) and has no write access to the Figma file itself. Token length of 32 bytes (256 bits) from a cryptographically secure random source is sufficient. Token expiry: 30 days from digest send date. Log token redemption events (`digest_marked_reviewed`) for abuse monitoring. If token abuse is detected (bulk redemption patterns), rotate tokens and invalidate outstanding tokens without requiring user re-authentication.
+
+---
+
+## 15. Full instrumentation spec
+
+This section specifies which events are instrumented in each rollout phase, the responsible data owner, and the validation approach.
+
+### Phase 0 instrumentation (internal dogfood - weeks 1-4)
+
+**Goal:** Establish actual baselines; validate event firing behaviour.
+
+| Event | Phase 0 requirement | Validation approach |
+|---|---|---|
+| `handoff_trigger_shown` | Fire on every qualifying save; include all defined properties | Manual spot-check: trigger 5 test files through heuristic criteria; confirm event fires in analytics warehouse within 60s |
+| `handoff_triggered` | Fire only after designer submits via the handoff share modal | Confirm event does NOT fire if designer opens share modal and cancels |
+| `handoff_trigger_suppressed` | Fire with correct `reason` field on each suppression path | Test all 4 suppression reasons in QA environment; confirm reason field accuracy |
+| `file_opened_by_non_editor` | Existing event - add `days_since_file_created` field | Backfill validation: confirm new field is present in 100% of events fired in Phase 0 |
+| `overlay_shown` | Fire on every qualifying first-open; include `trigger_reason` | Confirm overlay shown event fires before canvas interaction events in the session |
+| `overlay_step_completed` | Fire per step with correct `method` field | Test all three advance methods (action_taken, manual_advance, auto_advance) in QA |
+| `overlay_dismissed` | Fire with correct `method` field including `permanent_skip` | Confirm `overlay_permanently_dismissed` flag is set on user record after permanent skip |
+
+**Phase 0 baseline measurements (to be captured before Phase 1 launch):**
+- Actual `file_opened_by_non_editor_within_7d_rate` for Professional-tier internal files (current state, no treatment).
+- Actual P50 time from `file_shared` to `file_opened_by_non_editor` for internal teams.
+- Actual `devmode_session_started` rate within 24h of `file_opened_by_non_editor` for internal engineering files.
+
+### Phase 1 instrumentation (5% closed beta - weeks 5-10)
+
+**Goal:** Measure treatment vs. holdout; validate Pillar 3 event accuracy.
+
+| Event | Phase 1 additions | Responsible owner |
+|---|---|---|
+| `linear_subtask_created` | Add to production pipeline; fire on every successful sub-task creation | Integrations team |
+| `linear_subtask_skipped` | Fire with `reason` field for every suppression | Integrations team |
+| `linear_subtask_autoclosed` | Fire when both conditions met within 7d window | Integrations team |
+| `github_pr_injected` | Fire on every successful PR body injection | Integrations team |
+| `github_injection_skipped` | Fire with `reason` field for every skip | Integrations team |
+| `digest_sent` | Fire on every digest batch send; include `file_count` | Growth/comms infra |
+| `digest_cta_clicked` | Fire server-side on token redemption (not client-side pixel); include `days_since_share` | Growth/comms infra |
+| `digest_unsubscribed` | Fire immediately on unsubscribe link click | Growth/comms infra |
+
+**Holdout instrumentation:** The 5% holdout cohort must have identical event instrumentation to the treatment cohort except for the absence of the feature. This ensures the baseline `file_opened_by_non_editor_within_7d_rate` measurement is comparable.
+
+**Weekly data review in Phase 1:**
+- Every Monday: treatment vs. holdout `file_opened_by_non_editor_within_7d_rate` (7-day rolling window).
+- Every Monday: digest unsubscribe rate (cumulative since first send).
+- Every Monday: `file_shared` rate in treatment vs. holdout (guardrail).
+
+### Phase 2 instrumentation (25% expansion - weeks 11-16)
+
+**Goal:** A/B experiment instrumentation; full guardrail dashboard live.
+
+| Event / addition | Phase 2 requirement |
+|---|---|
+| Experiment arm assignment | Add `experiment_arm` field to `handoff_trigger_shown` and `overlay_shown` events; values: `top_bar | right_panel` and `cta_interactive | text_only` |
+| `digest_marked_reviewed` | Fire on token redemption; include `days_since_share` and `token_age_days` |
+| Designer NPS survey | In-product survey fires after `handoff_triggered` (3-day delay); `nps_response` event with `score: integer`, `feature: share_flow` |
+| Share modal exit without submit | Fire `handoff_modal_abandoned` event if share modal is opened from the trigger but closed without submitting |
+
+**Guardrail dashboard (live by Phase 2 week 1):**
+- Real-time alert if `file_shared` rate drops >3% week-over-week in treatment cohort.
+- Real-time alert if any single Pillar 3 API error rate exceeds 5% over a 1-hour rolling window.
+- Daily digest unsubscribe rate chart with 15% threshold line visible.
+
+### Phase 3 (GA) instrumentation
+
+**Goal:** Production-grade monitoring; automated incident triggers.
+
+| Monitor | Trigger threshold | Response |
+|---|---|---|
+| `file_shared` rate 7-day rolling | Drops >5% vs. 4-week pre-launch average | P1 incident; Pillar 1 disable within 30 min |
+| Digest unsubscribe rate 14-day rolling | Exceeds 20% | Auto-pause digest; P2 incident |
+| `handoff_trigger_shown` rate per file | Exceeds 5x per week for any org cohort | P1 incident; trigger rate-limiting deployed within 2h |
+| Linear API sub-task creation error rate 30-min rolling | Exceeds 10% | Auto-disable Pillar 3 Linear; P1 alert |
+
+---
+
+## 16. SLO revision history
+
+| Metric | v1 target | v2 target | v3 target | Rationale for change |
+|---|---|---|---|---|
+| `file_opened_by_non_editor_within_7d_rate` (North Star) | >50% within 3 quarters | >50% within 2 quarters | >50% within 2 quarters; measured as 4-week rolling average post-GA (not point-in-time) | v3 adds measurement methodology to prevent single-week spikes masking a lower trend |
+| Handoff trigger push latency | <500ms (P99) | <500ms (P99) | <500ms (P99) in Phase 1-2; <300ms (P99) at GA scale | Tightened for GA to account for higher event volume; baseline <200ms confirmed in Phase 0 required |
+| Linear sub-task creation latency | Within 60 seconds | Within 60 seconds | Within 60 seconds (P95); alert if >120s for any sub-task | Added P95 definition and alert threshold; a 60s average is meaningless if P95 is 5 minutes |
+| Digest unsubscribe rate | <15% in first 30 days | <15% in first 30 days | <15% in first 30 days; <10% at steady state (months 3+) | Added steady-state target; 15% is an acceptable launch rate but should converge down as list becomes self-selected engaged users |
+| Overlay shown to Dev Mode session rate | N/A | >40% of overlays shown complete all 3 steps | >40% completion rate; >50% `devmode_session_started` within 24h of overlay shown | v3 adds downstream behaviour metric (Dev Mode session) not just overlay completion |
+| P50 time from `file_shared` to `file_opened_by_non_editor` | >48h -> <6h | >48h -> <6h | Interim target <12h at Phase 2 exit; <6h at 2 quarters post-GA | Added interim target to create a checkable waypoint at Phase 2 rather than waiting 2 quarters |
+| Designer NPS for share flow | Must not decline >5 points | Must not decline >5 points | Must not decline >5 points in Phase 1; must not decline >3 points at GA | Tightened at GA; early pilots have higher designer self-selection and tolerance; GA population is more representative |
+
+---
+
+*This is the final PRD version. All open questions from v1 and v2 are resolved. The next document in this pipeline sequence is the system architecture for Engineering Review Activation.*
