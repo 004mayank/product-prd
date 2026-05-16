@@ -2,7 +2,8 @@
 
 **Product:** Stripe Billing (AI Primitives layer)
 **Author:** Mayank Malviya
-**Status:** v1 - Initial PRD
+**Version:** v2 - Improved PRD
+**Changes from v1:** Added merchant activation funnel with drop-off estimates, full data model for all three new objects, API contracts with request/response shapes, expanded event schema coverage, richer requirements with precise acceptance criteria and edge cases, deeper competitive analysis with numeric benchmarks, experiment framework with power calculations, risk register, and resolved open question 6 (CreditBalance vs. extended Meter).
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/stripe-teardown.md
 
 ---
@@ -12,6 +13,7 @@
 | Version | Key additions |
 |---|---|
 | v1 | Problem statement, target personas, three solution pillars, core loops, basic requirements, event schemas, success metrics, competitive context, open questions |
+| v2 | Merchant activation funnel, full data model, API contracts, expanded event schemas, richer requirements with acceptance criteria, competitive benchmarks, experiment framework, risk register, resolved open question 6 |
 
 ---
 
@@ -24,7 +26,7 @@ Today, every AI company that builds on Stripe must construct one or more of the 
 1. A credit balance ledger (Stripe has no native credit object)
 2. A real-time balance check API (the `Meter` object aggregates asynchronously - it is not queryable per-inference in real time)
 3. An automatic top-up flow (threshold-triggered recharge requires custom logic outside Stripe)
-4. An agent-payment delegation model (no Stripe product handles "AI agent initiates payment on behalf of user with scoped permission")
+4. An agent-payment delegation model (no Stripe product handles "AI agent initiates payment on behalf of user with scoped, revocable permission")
 
 This PRD specifies **Stripe AI Billing Primitives**: four new first-party objects and flows that close these gaps and make Stripe the complete billing infrastructure for AI-native products - without forcing merchants to build parallel systems.
 
@@ -108,7 +110,81 @@ The result: every AI company that grows past $1M ARR has built a bespoke billing
 
 ---
 
-## 5) Solution - three pillars
+## 5) Merchant activation funnel
+
+Understanding the friction points where AI merchants drop out before activating AI Billing Primitives is essential for designing the right onboarding and measuring product health.
+
+### Funnel: AI merchant -> CreditBalance activated
+
+```
+AI company creates Stripe account + processes first live payment
+(estimated pool: ~5,000 new AI-category accounts per quarter)
+           |
+           v [Drop-off: ~35% never explore Billing docs beyond Payments]
+Discovers AI Billing Primitives in docs or Dashboard prompt
+           |
+           v [Drop-off: ~25% who discover it do not start integration]
+Reads CreditBalance API docs; creates first CreditBalance object in test mode
+  --> AHA MOMENT CANDIDATE: first balance read returns correct value
+           |
+           v [Drop-off: ~40% who start test integration do not go live]
+Integrates CreditDeduction into inference call path in test mode
+           |
+           v [Drop-off: ~30% who complete test integration delay live launch]
+First live CreditDeduction call in production
+  --> ACTIVATION EVENT
+           |
+           v [Drop-off: ~20% who activate CreditBalance do not attach AutoTopUp]
+AutoTopUp configured on at least one Customer
+  --> DEEP ACTIVATION (highest LTV signal)
+```
+
+**Estimated conversion by step:**
+
+| Funnel step | Estimated conversion from prior step | Primary lever |
+|---|---|---|
+| Account -> Discovers AI Billing | ~65% | Dashboard prompt in Billing section for AI-category accounts; in-doc callout |
+| Discovers -> Test integration | ~75% | Quality of quickstart template; copy-paste code example completeness |
+| Test integration -> Live deduction | ~60% | Sandbox fidelity; clear error messages on common mistakes (missing idempotency key) |
+| Live deduction -> AutoTopUp attach | ~80% | One-click AutoTopUp configuration prompt immediately after first live deduction |
+| AutoTopUp attach -> PaymentDelegate interest | ~20% (distinct motion) | Separate funnel; relevant only for agentic platform builders |
+
+**Funnel intervention targets:**
+- Improving test-to-live conversion by 10 pp (from 60% to 70%) would add ~300 additional activated merchants per quarter from current account creation volume.
+- The AutoTopUp attach prompt immediately post-first-live-deduction is the highest-leverage single intervention - it requires no additional engineering discovery, just a moment-of-activation nudge.
+
+### Funnel: agentic platform builder -> PaymentDelegate activated
+
+```
+Agentic platform (Stripe merchant) learns about PaymentDelegate
+  --> Closed beta application submitted
+           |
+           v
+Accepted into closed beta; receives sandbox credentials + documentation
+           |
+           v [Drop-off: ~30% in beta do not complete integration within 30 days]
+First PaymentDelegate created in sandbox with scope validation tested
+           |
+           v [Drop-off: ~20% who complete sandbox do not go live within 60 days]
+First live agent-initiated PaymentIntent confirmed via delegate
+  --> LIVE ACTIVATION
+           |
+           v
+Delegated GPV reaches $10K/month per platform
+  --> GROWTH SIGNAL (expand cohort; publish case study)
+```
+
+### Edge case: AI startup founder who writes their own ledger before discovering CreditBalance
+
+**Scenario:** A founder integrates Stripe for payments in week 1, builds a Redis-based credit ledger in week 2, and discovers `CreditBalance` only when searching for "Stripe credits" three months later after their ledger has a reconciliation bug.
+
+**Current state:** The founder now has two ledgers and must migrate their balance history into Stripe's `CreditBalance` object. There is no migration API.
+
+**Required product response:** `CreditBalance` must support a `seed_balance` parameter on object creation that imports an existing balance snapshot without triggering a payment. This covers the migration case and reduces the adoption barrier for founders who built before the product existed. The seed event is recorded as a `credit_grant.type: migration` with no associated `PaymentIntent`.
+
+---
+
+## 6) Solution - three pillars
 
 ### Pillar 1: `CreditBalance` - native credit ledger object
 
@@ -156,7 +232,516 @@ An OAuth-style delegation model that allows an AI agent to initiate payment on b
 
 ---
 
-## 6) Core loops
+## 7) Full data model
+
+### `CreditBalance` object
+
+```json
+{
+  "id": "cb_1abc...",
+  "object": "credit_balance",
+  "customer": "cus_abc123",
+  "unit": "tokens",
+  "unit_display_name": "API tokens",
+  "balance": 84200,
+  "minimum_balance": 0,
+  "tab_limit": null,
+  "on_insufficient_balance": "block",
+  "auto_top_up_id": "atu_1abc...",
+  "status": "active",
+  "below_threshold": false,
+  "created": 1747000000,
+  "livemode": true,
+  "metadata": {}
+}
+```
+
+**Field specifications:**
+
+| Field | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `unit` | string | yes | none | Merchant-defined unit identifier (e.g., "tokens", "credits", "api_calls") |
+| `unit_display_name` | string | no | same as `unit` | Human-readable label shown on receipts and hosted customer portal |
+| `balance` | integer | system | 0 | Current balance in units; always non-negative unless `tab_limit` is set |
+| `minimum_balance` | integer | no | 0 | Floor below which deductions are rejected; must be >= 0 |
+| `tab_limit` | integer | no | null | Maximum negative balance allowed in tab mode; null means no tab |
+| `on_insufficient_balance` | enum | no | "block" | `"block"` returns 402; `"tab"` continues until `tab_limit` |
+| `below_threshold` | boolean | system | false | True when balance < `AutoTopUp.threshold`; set by Stripe on each deduction |
+| `status` | enum | system | "active" | `"active"`, `"frozen"` (merchant action), `"top_up_failed"` (after final retry) |
+
+### `CreditDeduction` object
+
+```json
+{
+  "id": "cd_1abc...",
+  "object": "credit_deduction",
+  "customer": "cus_abc123",
+  "credit_balance_id": "cb_1abc...",
+  "amount": 850,
+  "unit": "tokens",
+  "balance_before": 85050,
+  "balance_after": 84200,
+  "idempotency_key": "inference_session_xyz_call_12",
+  "metadata": {
+    "model": "gpt-4o",
+    "session_id": "sess_xyz"
+  },
+  "status": "succeeded",
+  "created": 1747123456,
+  "livemode": true
+}
+```
+
+### `CreditGrant` object
+
+```json
+{
+  "id": "cg_1abc...",
+  "object": "credit_grant",
+  "customer": "cus_abc123",
+  "credit_balance_id": "cb_1abc...",
+  "amount": 100000,
+  "unit": "tokens",
+  "type": "payment",
+  "payment_intent_id": "pi_1abc...",
+  "balance_before": 0,
+  "balance_after": 100000,
+  "expires_at": null,
+  "metadata": {},
+  "created": 1747100000,
+  "livemode": true
+}
+```
+
+**`CreditGrant.type` values:**
+
+| Type | Trigger | Payment intent required |
+|---|---|---|
+| `payment` | `PaymentIntent` succeeded; credit pack purchased | yes |
+| `auto_top_up` | `AutoTopUp` triggered and PaymentIntent succeeded | yes (auto-created) |
+| `manual` | Merchant API call; for compensation, beta credits, admin adjustments | no |
+| `migration` | Seed balance import from existing ledger | no |
+
+### `AutoTopUp` object
+
+```json
+{
+  "id": "atu_1abc...",
+  "object": "auto_top_up",
+  "customer": "cus_abc123",
+  "credit_balance_id": "cb_1abc...",
+  "threshold": 10000,
+  "recharge_amount": 100000,
+  "payment_method": "pm_1abc...",
+  "status": "active",
+  "retry_schedule": "smart_retries",
+  "max_retries": 3,
+  "last_triggered_at": null,
+  "last_trigger_status": null,
+  "created": 1747000000,
+  "livemode": true,
+  "metadata": {}
+}
+```
+
+### `PaymentDelegate` object
+
+```json
+{
+  "id": "pd_1abc...",
+  "object": "payment_delegate",
+  "customer": "cus_abc123",
+  "agent_application_id": "app_1abc...",
+  "agent_display_name": "Tripper AI",
+  "scope": {
+    "max_amount_per_transaction": 10000,
+    "allowed_mccs": ["7011", "4511"],
+    "total_spend_cap": 50000,
+    "spent_to_date": 4900,
+    "valid_until": 1747209999,
+    "valid_after": 1747100000
+  },
+  "status": "active",
+  "revoked_at": null,
+  "revocation_reason": null,
+  "created": 1747100000,
+  "livemode": true,
+  "metadata": {}
+}
+```
+
+**`PaymentDelegate` status transitions:**
+
+```
+created -> active -> revoked (user action or expiry)
+                  -> expired (valid_until passed)
+                  -> spend_cap_reached (spent_to_date >= total_spend_cap)
+```
+
+---
+
+## 8) API contracts
+
+### Create `CreditBalance`
+
+```
+POST /v1/credit_balances
+```
+
+**Request:**
+
+```json
+{
+  "customer": "cus_abc123",
+  "unit": "tokens",
+  "unit_display_name": "API tokens",
+  "on_insufficient_balance": "block",
+  "metadata": {}
+}
+```
+
+**Response (201):**
+
+```json
+{
+  "id": "cb_1abc...",
+  "object": "credit_balance",
+  "balance": 0,
+  "status": "active",
+  ...
+}
+```
+
+**Error responses:**
+
+| HTTP code | Error code | Condition |
+|---|---|---|
+| 400 | `balance_already_exists` | Customer already has a CreditBalance with the same `unit` |
+| 400 | `invalid_unit` | `unit` string exceeds 64 characters or contains special characters |
+| 404 | `customer_not_found` | Invalid `customer` ID |
+
+---
+
+### Create `CreditDeduction`
+
+```
+POST /v1/credit_deductions
+Idempotency-Key: {merchant-generated unique key per inference call}
+```
+
+**Request:**
+
+```json
+{
+  "customer": "cus_abc123",
+  "amount": 850,
+  "metadata": {
+    "model": "gpt-4o",
+    "session_id": "sess_xyz"
+  }
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "id": "cd_1abc...",
+  "object": "credit_deduction",
+  "balance_before": 85050,
+  "balance_after": 84200,
+  "balance_stale": false,
+  "status": "succeeded"
+}
+```
+
+**Error responses:**
+
+| HTTP code | Error code | Condition | Merchant action |
+|---|---|---|---|
+| 402 | `insufficient_credits` | Balance is 0 or would go below `minimum_balance` | Block inference; show user credit purchase flow |
+| 409 | `idempotency_key_replay` | Same key sent; deduction already processed | Return original response; do not re-deduct |
+| 503 | `balance_service_unavailable` | Balance service degraded; response includes `balance_stale: true` | Allow or block per merchant's own policy; retry with backoff |
+
+**Design note - `balance_stale` flag:** When the in-memory balance cache is behind the persistence layer (brief windows during service degradation), Stripe returns the last-known balance with `balance_stale: true`. Merchants should define their own policy in their code: allow inference with a staleness tolerance (acceptable for most use cases) or block (acceptable for high-value inference). The flag makes this explicit rather than silently serving a potentially outdated balance.
+
+---
+
+### Create `AutoTopUp`
+
+```
+POST /v1/auto_top_ups
+```
+
+**Request:**
+
+```json
+{
+  "customer": "cus_abc123",
+  "threshold": 10000,
+  "recharge_amount": 100000,
+  "payment_method": "pm_1abc..."
+}
+```
+
+**Response (201):** Returns the `AutoTopUp` object.
+
+**Error responses:**
+
+| HTTP code | Error code | Condition |
+|---|---|---|
+| 400 | `threshold_exceeds_balance` | Configured `threshold` is greater than current `balance` - top-up would trigger immediately on creation |
+| 400 | `no_credit_balance` | No active `CreditBalance` found for this customer |
+| 400 | `duplicate_auto_top_up` | Customer already has an active `AutoTopUp`; update the existing one |
+
+---
+
+### Create `PaymentDelegate`
+
+```
+POST /v1/payment_delegates
+```
+
+**Request:**
+
+```json
+{
+  "customer": "cus_abc123",
+  "agent_application_id": "app_1abc...",
+  "scope": {
+    "max_amount_per_transaction": 10000,
+    "allowed_mccs": ["7011", "4511"],
+    "total_spend_cap": 50000,
+    "valid_until": 1747209999
+  }
+}
+```
+
+**Response (201):** Returns the `PaymentDelegate` object.
+
+---
+
+### Revoke `PaymentDelegate`
+
+```
+POST /v1/payment_delegates/{id}/revoke
+```
+
+**Request:**
+
+```json
+{
+  "reason": "user_requested"
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "id": "pd_1abc...",
+  "status": "revoked",
+  "revoked_at": 1747150000,
+  "revocation_reason": "user_requested"
+}
+```
+
+**Propagation guarantee:** Revocation is propagated to all Stripe edge nodes within 60s (P99). Any `PaymentIntent` created with this delegate ID after propagation is complete returns `403 Delegate Revoked`.
+
+---
+
+## 9) Expanded event schemas
+
+### `credit_balance.created`
+
+```json
+{
+  "id": "evt_...",
+  "type": "credit_balance.created",
+  "data": {
+    "object": {
+      "id": "cb_1abc...",
+      "customer": "cus_abc123",
+      "unit": "tokens",
+      "balance": 0,
+      "status": "active",
+      "created": 1747000000
+    }
+  }
+}
+```
+
+### `credit_balance.updated`
+
+```json
+{
+  "id": "evt_...",
+  "type": "credit_balance.updated",
+  "data": {
+    "object": {
+      "id": "cb_1abc...",
+      "customer": "cus_abc123",
+      "unit": "tokens",
+      "balance": 84200,
+      "previous_balance": 100000,
+      "last_deduction_id": "cd_1abc...",
+      "below_threshold": false,
+      "auto_top_up_id": "atu_1abc...",
+      "livemode": true
+    }
+  }
+}
+```
+
+### `credit_balance.below_threshold`
+
+Emitted when `balance` crosses below `AutoTopUp.threshold` for the first time in a session (not on every deduction while below threshold).
+
+```json
+{
+  "id": "evt_...",
+  "type": "credit_balance.below_threshold",
+  "data": {
+    "object": {
+      "id": "cb_1abc...",
+      "customer": "cus_abc123",
+      "balance": 9800,
+      "threshold": 10000,
+      "auto_top_up_id": "atu_1abc...",
+      "auto_top_up_status": "triggering"
+    }
+  }
+}
+```
+
+### `credit_balance.tab_limit_reached`
+
+```json
+{
+  "id": "evt_...",
+  "type": "credit_balance.tab_limit_reached",
+  "data": {
+    "object": {
+      "id": "cb_1abc...",
+      "customer": "cus_abc123",
+      "balance": -50000,
+      "tab_limit": -50000,
+      "on_insufficient_balance_switched_to": "block"
+    }
+  }
+}
+```
+
+### `auto_top_up.triggered`
+
+```json
+{
+  "id": "evt_...",
+  "type": "auto_top_up.triggered",
+  "data": {
+    "object": {
+      "id": "atu_1abc...",
+      "customer": "cus_abc123",
+      "trigger_balance": 10000,
+      "current_balance": 9800,
+      "recharge_amount": 100000,
+      "payment_method": "pm_1abc...",
+      "status": "pending",
+      "payment_intent_id": "pi_1abc...",
+      "attempt_number": 1,
+      "livemode": true
+    }
+  }
+}
+```
+
+### `auto_top_up.succeeded`
+
+```json
+{
+  "id": "evt_...",
+  "type": "auto_top_up.succeeded",
+  "data": {
+    "object": {
+      "id": "atu_1abc...",
+      "customer": "cus_abc123",
+      "recharge_amount": 100000,
+      "new_balance": 109800,
+      "payment_intent_id": "pi_1abc...",
+      "credit_grant_id": "cg_1abc...",
+      "time_from_trigger_to_grant_ms": 4200
+    }
+  }
+}
+```
+
+### `auto_top_up.failed_final`
+
+```json
+{
+  "id": "evt_...",
+  "type": "auto_top_up.failed_final",
+  "data": {
+    "object": {
+      "id": "atu_1abc...",
+      "customer": "cus_abc123",
+      "attempts": 3,
+      "last_failure_code": "card_declined",
+      "credit_balance_status_set_to": "top_up_failed"
+    }
+  }
+}
+```
+
+### `payment_delegate.used`
+
+```json
+{
+  "id": "evt_...",
+  "type": "payment_delegate.used",
+  "data": {
+    "object": {
+      "id": "pd_1abc...",
+      "customer": "cus_abc123",
+      "agent_application_id": "app_1abc...",
+      "payment_intent_id": "pi_1abc...",
+      "amount": 4900,
+      "currency": "usd",
+      "scope": {
+        "max_amount_per_transaction": 10000,
+        "allowed_mccs": ["7011", "4511"],
+        "total_spend_cap": 50000,
+        "spent_to_date": 4900,
+        "valid_until": 1747209999
+      },
+      "status": "confirmed",
+      "livemode": true
+    }
+  }
+}
+```
+
+### `payment_delegate.revoked`
+
+```json
+{
+  "id": "evt_...",
+  "type": "payment_delegate.revoked",
+  "data": {
+    "object": {
+      "id": "pd_1abc...",
+      "customer": "cus_abc123",
+      "revoked_at": 1747150000,
+      "revocation_reason": "user_requested",
+      "in_flight_payment_intents_cancelled": ["pi_2abc..."]
+    }
+  }
+}
+```
+
+---
+
+## 10) Core loops
 
 ### Loop A - Purchase credits -> use product -> auto-refill (credit lifecycle loop)
 
@@ -207,184 +792,107 @@ User adjusts delegate scope or revokes for future tasks
 
 ---
 
-## 7) Key event schemas
-
-### `credit_balance.updated`
-
-```json
-{
-  "id": "evt_1abc...",
-  "object": "event",
-  "type": "credit_balance.updated",
-  "created": 1747123456,
-  "data": {
-    "object": {
-      "id": "cb_1abc...",
-      "object": "credit_balance",
-      "customer": "cus_abc123",
-      "unit": "tokens",
-      "balance": 84200,
-      "previous_balance": 100000,
-      "last_deduction_id": "cd_1abc...",
-      "below_threshold": false,
-      "auto_top_up_id": "atu_1abc...",
-      "livemode": true
-    }
-  }
-}
-```
-
-### `auto_top_up.triggered`
-
-```json
-{
-  "id": "evt_2abc...",
-  "object": "event",
-  "type": "auto_top_up.triggered",
-  "created": 1747123500,
-  "data": {
-    "object": {
-      "id": "atu_1abc...",
-      "object": "auto_top_up",
-      "customer": "cus_abc123",
-      "trigger_balance": 10000,
-      "current_balance": 9800,
-      "recharge_amount": 100000,
-      "payment_method": "pm_1abc...",
-      "status": "pending",
-      "payment_intent_id": "pi_1abc...",
-      "livemode": true
-    }
-  }
-}
-```
-
-### `payment_delegate.used`
-
-```json
-{
-  "id": "evt_3abc...",
-  "object": "event",
-  "type": "payment_delegate.used",
-  "created": 1747123600,
-  "data": {
-    "object": {
-      "id": "pd_1abc...",
-      "object": "payment_delegate",
-      "customer": "cus_abc123",
-      "agent_application_id": "app_1abc...",
-      "payment_intent_id": "pi_1abc...",
-      "amount": 4900,
-      "currency": "usd",
-      "scope": {
-        "max_amount_per_transaction": 10000,
-        "allowed_mccs": ["7011", "4511"],
-        "total_spend_cap": 50000,
-        "spent_to_date": 4900,
-        "valid_until": 1747209999
-      },
-      "status": "confirmed",
-      "livemode": true
-    }
-  }
-}
-```
-
-### `credit_deduction` API response
-
-```json
-{
-  "id": "cd_1abc...",
-  "object": "credit_deduction",
-  "customer": "cus_abc123",
-  "credit_balance_id": "cb_1abc...",
-  "amount": 850,
-  "unit": "tokens",
-  "balance_before": 85050,
-  "balance_after": 84200,
-  "idempotency_key": "inference_session_xyz_call_12",
-  "metadata": {
-    "model": "gpt-4o",
-    "session_id": "sess_xyz"
-  },
-  "status": "succeeded",
-  "created": 1747123456
-}
-```
-
----
-
-## 8) Basic requirements
+## 11) Full requirements
 
 ### Req 1 - `CreditBalance` object
 
-| ID | Requirement | Acceptance criteria | Edge case |
-|---|---|---|---|
-| 1.1 | `CreditDeduction` API responds with updated balance in <100ms P95 | Latency SLO met under 1,000 concurrent deduction calls/sec per merchant | Timeout >150ms: return cached balance with `balance_stale: true` flag; log `credit_deduction_latency_breach` |
-| 1.2 | Concurrent deductions serialised at balance level; no overdraft beyond configured tolerance | Balance never goes below configured `minimum_balance` floor under race conditions (verified with concurrent load test) | If `minimum_balance` is not set, allow to zero then return `402 Insufficient Credits` |
-| 1.3 | `CreditGrant` on successful `PaymentIntent` auto-creates within 5s of `payment_intent.succeeded` event | Verified by webhook lag measurement in test suite | If auto-grant fails, emit `credit_grant.failed` event; merchant must handle manually; do not silently lose credits |
-| 1.4 | Balance readable via GET endpoint at <50ms P95 | Perf test across 10K merchant accounts | No read lock during concurrent deductions; reads are eventually consistent within 200ms |
+| ID | Requirement | Acceptance criteria | Edge case | Test scenario |
+|---|---|---|---|---|
+| 1.1 | `CreditDeduction` API responds with updated balance in <100ms P95 | Latency SLO met under 1,000 concurrent deduction calls/sec per merchant | Timeout >150ms: return cached balance with `balance_stale: true` flag; log `credit_deduction_latency_breach` | Load test: 1,000 concurrent deductions against single customer; verify P95 and `balance_stale` flag on simulated timeout |
+| 1.2 | Concurrent deductions serialised at balance level; no overdraft beyond configured tolerance | Balance never goes below configured `minimum_balance` floor under race conditions (verified with concurrent load test) | If `minimum_balance` is not set, allow to zero then return `402 Insufficient Credits` | Race test: 50 simultaneous deductions of 100 tokens against a balance of 1,000 tokens; verify final balance is exactly 0, not negative |
+| 1.3 | `CreditGrant` on successful `PaymentIntent` auto-creates within 5s of `payment_intent.succeeded` event | Verified by webhook lag measurement in test suite | If auto-grant fails, emit `credit_grant.failed` event; merchant must handle manually; do not silently lose credits | Inject delay in grant creation service; verify `credit_grant.failed` fires and balance is not changed until manual re-trigger |
+| 1.4 | Balance readable via GET endpoint at <50ms P95 | Perf test across 10K merchant accounts | No read lock during concurrent deductions; reads are eventually consistent within 200ms | Parallel read during high-deduction load; verify consistency window does not exceed 200ms |
+| 1.5 | `seed_balance` on creation imports existing balance without payment | `CreditGrant` of type `migration` created with no `payment_intent_id`; balance set correctly | Seed balance must be > 0; negative seed rejected with 400 | Create CreditBalance with `seed_balance: 50000`; verify balance is 50,000 and grant type is `migration` |
 
 ### Req 2 - `AutoTopUp` flow
 
-| ID | Requirement | Acceptance criteria | Edge case |
-|---|---|---|---|
-| 2.1 | Top-up triggered within 10s of balance crossing threshold | P95 trigger latency <10s measured from `credit_balance.updated` event with `below_threshold: true` | Network partition: trigger fires from balance update event; idempotency key prevents duplicate top-up if event delivered twice |
-| 2.2 | Smart Retries applied to failed top-up `PaymentIntent` | Retry behaviour matches Smart Retries on standard subscription invoices | After final retry failure, emit `auto_top_up.failed_final`; balance status set to `top_up_failed`; no further auto-retries without merchant action |
-| 2.3 | Merchant can configure `on_insufficient_balance` as `block` or `tab` | Both modes work; `tab` allows negative balance up to configured limit; `block` returns `402` at zero | If `tab` limit is reached, switch to `block` behaviour automatically; emit `credit_balance.tab_limit_reached` |
+| ID | Requirement | Acceptance criteria | Edge case | Test scenario |
+|---|---|---|---|---|
+| 2.1 | Top-up triggered within 10s of balance crossing threshold | P95 trigger latency <10s measured from `credit_balance.below_threshold` event emission | Network partition: trigger fires from balance update event; idempotency key prevents duplicate top-up if event delivered twice | Simulate network partition during threshold crossing; verify single top-up payment intent created, not two |
+| 2.2 | Smart Retries applied to failed top-up `PaymentIntent` | Retry behaviour matches Smart Retries on standard subscription invoices | After final retry failure, emit `auto_top_up.failed_final`; balance status set to `top_up_failed`; no further auto-retries without merchant action | Simulate card decline on all retries; verify exactly 3 attempts, then `failed_final` event, then no further attempts |
+| 2.3 | Merchant can configure `on_insufficient_balance` as `block` or `tab` | Both modes work; `tab` allows negative balance up to configured limit; `block` returns `402` at zero | If `tab` limit is reached, switch to `block` behaviour automatically; emit `credit_balance.tab_limit_reached` | Set tab_limit=-10000; deduct until -10001; verify final deduction returns 402 and event fires |
+| 2.4 | `AutoTopUp` idempotent: duplicate threshold-cross events do not trigger duplicate payments | Exactly one `PaymentIntent` created per threshold-crossing episode; second event is a no-op if first intent is in `pending` or `succeeded` state | Deductions that cross threshold multiple times in rapid succession trigger only one top-up | Send 10 rapid deductions all crossing threshold simultaneously; verify one PaymentIntent created |
 
 ### Req 3 - `PaymentDelegate` object
 
-| ID | Requirement | Acceptance criteria | Edge case |
-|---|---|---|---|
-| 3.1 | Scope validation runs before `PaymentIntent` confirmation; out-of-scope returns `403` with violated scope field named | <50ms scope check; correct error body in 100% of test cases | If scope record is unavailable (service error), fail safe: reject the `PaymentIntent` with `503 Delegate Validation Unavailable` |
-| 3.2 | Revocation takes effect within 60s across all endpoints | Revoked delegate ID rejected by P99 within 60s globally | In-flight `PaymentIntent` in `requires_confirmation` at revocation time: cancel the intent; emit `payment_intent.cancelled` |
-| 3.3 | User-visible audit trail: every `payment_delegate.used` event readable by the customer in hosted receipt UI | Audit trail shows agent name, amount, scope used, and timestamp | If agent application is deleted by merchant, replace agent name with "Deleted application" in audit trail; do not remove the record |
+| ID | Requirement | Acceptance criteria | Edge case | Test scenario |
+|---|---|---|---|---|
+| 3.1 | Scope validation runs before `PaymentIntent` confirmation; out-of-scope returns `403` with violated scope field named | <50ms scope check; correct error body in 100% of test cases | If scope record is unavailable (service error), fail safe: reject the `PaymentIntent` with `503 Delegate Validation Unavailable` | Simulate scope service outage; verify PaymentIntent returns 503, not 200 or 403 |
+| 3.2 | Revocation takes effect within 60s across all endpoints | Revoked delegate ID rejected by P99 within 60s globally | In-flight `PaymentIntent` in `requires_confirmation` at revocation time: cancel the intent; emit `payment_intent.cancelled` | Revoke delegate while PaymentIntent is in `requires_confirmation`; verify cancellation and event emission within 60s |
+| 3.3 | User-visible audit trail: every `payment_delegate.used` event readable by the customer in hosted receipt UI | Audit trail shows agent name, amount, scope used, and timestamp | If agent application is deleted by merchant, replace agent name with "Deleted application" in audit trail; do not remove the record | Delete agent application; verify historical `payment_delegate.used` events still appear with "Deleted application" label |
+| 3.4 | Spend cap enforced in real time; `PaymentIntent` creation with delegate rejected when `spent_to_date >= total_spend_cap` | `403 Spend Cap Reached` returned with `spent_to_date` and `total_spend_cap` in response body | Concurrent agent transactions that would collectively exceed cap: first to confirm wins; subsequent return 403 | Two simultaneous PaymentIntents that would each push spending over cap; verify only one succeeds |
 
 ---
 
-## 9) Competitive analysis
+## 12) Competitive analysis
 
-| Competitor | How they address AI billing | Stripe's gap vs. this competitor | This PRD's response |
-|---|---|---|---|
-| **Lago** (open-source metering) | Native credit ledger, real-time balance queries, usage-based invoicing; purpose-built for AI/API billing | Lago is free to self-host; Stripe currently requires DIY to match its feature set | `CreditBalance` + `AutoTopUp` as first-party objects; hosted, no infra overhead |
-| **Orb** | Subscription + usage billing platform with sub-second metering, plan version control, and credit grants | Orb's metering latency is lower than Stripe's current `Meter` object; purpose-built billing UI for finance teams | Real-time `CreditDeduction` at <100ms closes the latency gap; finance-team UI is not this PRD's scope (v2) |
-| **Metronome** | Enterprise usage-based billing with multi-dimensional pricing, ERP integrations, and revenue recognition | Metronome serves large enterprise with complex pricing; higher touch sales motion | This PRD targets seed to Series B AI companies; different motion. Metronome is not the head-to-head competitor here |
-| **Recurly / Chargebee** | SaaS subscription billing; limited native usage-based billing | Neither has a real-time balance deduction primitive or agent-payment delegation | Not the relevant competitor for AI billing; legacy SaaS billing posture |
+| Competitor | How they address AI billing | Stripe's gap vs. this competitor | This PRD's response | Win condition |
+|---|---|---|---|---|
+| **Lago** (open-source metering) | Native credit ledger, real-time balance queries, usage-based invoicing; purpose-built for AI/API billing; free to self-host | Lago is free; Stripe currently requires DIY to match its feature set; Lago integrates with Stripe for payments, creating a two-vendor split | `CreditBalance` + `AutoTopUp` as first-party objects; hosted, no infra overhead; native Stripe integration removes two-vendor complexity | Stripe wins when Lago's self-host operational overhead (Redis, Postgres, upgrade management) exceeds the value of free licensing; typically at Series A when the team has a dedicated billing engineer |
+| **Orb** | Subscription + usage billing platform with sub-second metering, plan version control, and credit grants | Orb's metering latency is lower than Stripe's current `Meter` object; purpose-built billing UI for finance teams; Orb prices at ~$500-2,000/month for mid-market | Real-time `CreditDeduction` at <100ms closes the latency gap; finance-team UI is not this PRD's scope (v2); Stripe's price advantage at low volume (Orb is expensive at seed stage) | Stripe wins at seed to Series A; Orb wins at growth stage with complex multi-dimensional pricing and finance-team buyers |
+| **Metronome** | Enterprise usage-based billing with multi-dimensional pricing, ERP integrations, and revenue recognition | Metronome serves large enterprise with complex pricing; higher-touch sales motion; estimated pricing at $2,000-10,000+/month | This PRD targets seed to Series B AI companies; different motion. Metronome is not the head-to-head competitor here | Not the relevant competitor for AI billing; Metronome wins on pricing complexity that this PRD does not address |
+| **Recurly / Chargebee** | SaaS subscription billing; limited native usage-based billing | Neither has a real-time balance deduction primitive or agent-payment delegation | Not the relevant competitor for AI billing; legacy SaaS billing posture | N/A - different market |
 
-**Win condition:** Stripe wins the AI billing market if it ships `CreditBalance` before Lago achieves enterprise distribution. Lago's open-source model creates a free alternative, but Stripe's network effect (fraud data, global acquiring, Connect) means merchants who want to use Stripe as their payments layer still benefit from a native billing complement. The risk is a two-vendor world (Lago for billing, Stripe for payments) that reduces Stripe's ARPU and switching cost.
+### Specific benchmark comparisons
+
+**Stripe vs. Lago for an AI startup at $500K ARR:**
+
+| Dimension | Lago self-hosted | Stripe AI Billing Primitives |
+|---|---|---|
+| Integration time | 3-5 days (Lago + Stripe combo) | 1-2 days (Stripe-native) |
+| Monthly cost | ~$0 software; ~$200-500 infra | Included in Stripe Billing (0.5% of billing volume) |
+| Real-time balance check latency | <10ms (local Redis) | <100ms (Stripe API call) |
+| Data reconciliation | Required (Lago + Stripe are separate) | Not required (single source of truth) |
+| Dispute handling | Manual reconciliation between Lago and Stripe | Native: `charge.dispute.created` triggers credit review |
+| Team required | 1 engineer to maintain | Zero - managed by Stripe |
+
+**Win condition for Stripe:** At $500K ARR, a 1-2 day integration advantage and zero maintenance overhead outweigh Lago's latency advantage for most AI startups. Lago wins for companies that already have a billing engineer and need sub-10ms balance checks (high-frequency trading-style inference patterns).
+
+**Stripe vs. Orb for an AI company at Series B ($10M ARR):**
+
+| Dimension | Orb | Stripe AI Billing Primitives |
+|---|---|---|
+| Monthly cost (estimated) | $1,000-2,000 | ~$4,000 (0.5% of $800K billing volume) |
+| Multi-dimensional pricing support | Yes (credits x plan tier x geography) | No (this PRD covers single-unit credits) |
+| Finance team reporting UI | Yes - Orb has a full finance dashboard | No - merchant must use Sigma or build own |
+| Churn/dunning automation | Limited | Full Smart Retries + Stripe dunning |
+| Agent payment delegation | No | Yes (unique to Stripe) |
+
+**Win condition for Stripe:** Stripe wins on the dunning and churn automation side (Smart Retries) and uniquely on `PaymentDelegate`. Orb wins on multi-dimensional pricing and the finance-team UI. At $10M+ ARR with a dedicated finance team, Orb is the more likely winner unless the AI product's billing model is simple (single credit unit, no geographic pricing tiers).
 
 ---
 
-## 10) Success metrics
+## 13) Success metrics
 
 ### North Star
+
 **AI Billing Primitives Merchant Activation Rate** - percentage of AI-category Stripe merchants (identified by `Meter` usage or explicit AI category tag) who activate at least one of `CreditBalance`, `AutoTopUp`, or `PaymentDelegate` within 90 days of GA.
 
 ### Input metrics (leading indicators)
 
-| Metric | Baseline (estimated) | 90-day target | Instrumentation event |
-|---|---|---|---|
-| `CreditBalance` objects created per week (AI-category merchants) | 0 (new product) | 500 | `credit_balance.created` count |
-| `AutoTopUp` attach rate (of merchants with `CreditBalance`) | 0 | >70% | `auto_top_up.created` / `credit_balance.created` |
-| Auto-refill success rate (first or second attempt) | 0 | >85% | `auto_top_up.succeeded` / `auto_top_up.triggered` |
-| Delegated GPV ($) | 0 | $10M (closed beta) | `payment_delegate.used` sum of `amount` |
-| AI merchant Billing attach rate | ~45% (est.) | 65% | merchants with active `Subscription` or `Meter` / total AI-category merchants |
-| AI billing integration support ticket volume | Baseline T-90 days | -40% | Zendesk AI-billing label count |
+| Metric | Baseline (estimated) | 90-day target | Instrumentation event | Owner |
+|---|---|---|---|---|
+| `CreditBalance` objects created per week (AI-category merchants) | 0 (new product) | 500 | `credit_balance.created` count | Billing PM |
+| `AutoTopUp` attach rate (of merchants with `CreditBalance`) | 0 | >70% | `auto_top_up.created` / `credit_balance.created` | Billing PM |
+| Auto-refill success rate (first or second attempt) | 0 | >85% | `auto_top_up.succeeded` / `auto_top_up.triggered` | Payments infra |
+| Delegated GPV ($) | 0 | $10M (closed beta) | `payment_delegate.used` sum of `amount` | Agentic PM |
+| AI merchant Billing attach rate | ~45% (est.) | 65% | merchants with active `Subscription` or `Meter` / total AI-category merchants | Growth |
+| AI billing integration support ticket volume | Baseline T-90 days | -40% | Zendesk AI-billing label count | Developer experience |
+| Median time from first live charge to CreditBalance activation | N/A | <7 days | Time delta: first `charge.succeeded` to first `credit_balance.created` | Growth |
 
 ### Guardrail metrics
 
-| Metric | Threshold | Risk if breached |
-|---|---|---|
-| `CreditDeduction` P95 latency | <100ms | Inference products cannot tolerate >100ms billing overhead; merchants revert to DIY |
-| `AutoTopUp` trigger P95 latency | <10s from threshold crossing | Users experience service interruption between balance hitting zero and top-up restoring |
-| `PaymentDelegate` revocation P99 propagation | <60s | Revoked agents can initiate payments in the gap; user trust failure |
-| Credit overdraft incidents (balance below `minimum_balance`) | Zero in prod test suite | Revenue leakage for merchant; Stripe liability if concurrent deduction bug causes overdraft |
-| `PaymentDelegate` revocation rate within 7 days of first use | <10% | High revocation = trust failure in agentic payment model; signals UX or security concern |
+| Metric | Threshold | Risk if breached | Response |
+|---|---|---|---|
+| `CreditDeduction` P95 latency | <100ms | Inference products cannot tolerate >100ms billing overhead; merchants revert to DIY | Page on-call; activate degraded mode (serve stale balance with flag) |
+| `AutoTopUp` trigger P95 latency | <10s from threshold crossing | Users experience service interruption between balance hitting zero and top-up restoring | Investigate event pipeline lag; manual trigger recovery for affected customers |
+| `PaymentDelegate` revocation P99 propagation | <60s | Revoked agents can initiate payments in the gap; user trust failure | Immediate incident; notify affected customers; log all payments in revocation window for review |
+| Credit overdraft incidents (balance below `minimum_balance`) | Zero in prod | Revenue leakage for merchant; Stripe liability if concurrent deduction bug causes overdraft | Immediate post-mortem; compensate affected merchant |
+| `PaymentDelegate` revocation rate within 7 days of first use | <10% | High revocation = trust failure in agentic payment model | User research sprint; scope UI review |
 
 ---
 
-## 11) Trade-offs
+## 14) Trade-offs
 
 ### Trade-off 1: Real-time balance at the cost of consistency window
 
@@ -404,9 +912,98 @@ Should `CreditBalance` be denominated in currency (cents) or in merchant-defined
 
 **Decision:** Unit denomination with merchant-defined `unit` string. Stripe stores the balance in units; the merchant controls the conversion rate between units and currency. This decouples pricing changes (update the conversion rate in the merchant's application) from billing infrastructure (credit object unchanged).
 
+### Trade-off 4: Single `CreditBalance` per customer vs. multiple
+
+Should a customer be allowed to have multiple `CreditBalance` objects (one per unit type - tokens AND API credits AND minutes)? Multiple balances enable more granular product pricing but add complexity to deduction routing (which balance does a deduction apply to?).
+
+**Decision for v1:** One active `CreditBalance` per customer per `unit` type. Merchants who need multi-dimensional balance tracking (e.g., separate pools for text tokens and image credits) create two separate `CreditBalance` objects and specify the `credit_balance_id` explicitly on each `CreditDeduction` call. This avoids implicit routing ambiguity.
+
 ---
 
-## 12) Open questions
+## 15) Experiment framework
+
+### Experiment 1: One-click `AutoTopUp` attachment prompt at first live deduction
+
+**Hypothesis:** Showing an `AutoTopUp` configuration prompt immediately after a merchant's first live `CreditDeduction` event (in the Stripe Dashboard and via a Stripe-initiated email) increases `AutoTopUp` attach rate by 20 pp within 30 days of first deduction.
+
+**Test design:**
+- Control: Default behaviour - no prompt; merchant finds `AutoTopUp` in docs.
+- Treatment: In-Dashboard banner + triggered email at first live deduction: "Set up automatic top-up so your users never run out of credits."
+
+**Primary metric:** `AutoTopUp` attach rate within 30 days of first live `CreditDeduction`.
+**Secondary metric:** Time-to-AutoTopUp-creation (median, in days).
+
+**Power calculation:** Assume 200 new merchants activate `CreditBalance` per month in the first 6 months post-GA. At 50/50 split, 100 merchants per arm per month. To detect a 20 pp lift from a 50% baseline to 70% attach rate with 80% power and alpha=0.05: approximately 85 merchants per arm required. One month of data is sufficient to reach significance.
+
+**Rollout:** 50/50 A/B; all AI-category merchants who create their first live `CreditDeduction` in the experiment window. Kill switch: if `AutoTopUp` attach rate in treatment drops below control (e.g., prompt increases confusion), revert within 24h.
+
+---
+
+### Experiment 2: Pre-built credit template in Stripe Dashboard for AI-category accounts
+
+**Hypothesis:** Offering a "Credit billing quick-start" template in the Billing section of the Dashboard (for AI-category accounts) reduces median time-to-first-live-deduction from an estimated 7 days to 3 days.
+
+**Test design:**
+- Control: Standard Billing documentation experience - merchant finds `CreditBalance` docs organically.
+- Treatment: Prominent "Set up AI credit billing" card in the Billing Dashboard section with a guided three-step flow: (1) create `CreditBalance`, (2) integrate `CreditDeduction` with the provided code snippet, (3) configure `AutoTopUp`.
+
+**Primary metric:** Median days from account creation (for AI-category accounts) to first live `CreditDeduction`.
+**Secondary metric:** Drop-off rate at each step of the guided flow.
+
+**Power calculation:** To detect a 4-day reduction in median time (from 7 to 3) with high confidence, track time-to-activation distributions. Use a log-rank test on the survival curve. At 200 merchants/month, 60 days of data should provide sufficient power.
+
+**Rollout:** 50/50; new AI-category accounts only (identified at signup by product category or first `Meter` event). Kill switch: if template accounts show lower activation rate than control (template creates confusion), revert immediately.
+
+---
+
+### Experiment 3: `PaymentDelegate` user-facing revocation UI in Stripe Customer Portal
+
+**Hypothesis:** Adding a "Manage AI agent permissions" section to the Stripe-hosted Customer Portal (where customers can view and revoke active `PaymentDelegate`s) reduces `PaymentDelegate` revocation rate within 7 days from an estimated 15% (closed beta baseline) to <10%.
+
+**Rationale:** If users can easily see and manage delegate permissions in a trusted Stripe-hosted surface, they are less likely to panic-revoke because the permission feels controllable.
+
+**Test design:**
+- Control: Revocation available only via merchant's own UI (merchant must implement revocation interface).
+- Treatment: Stripe Customer Portal shows "AI agents with payment access" with revoke button per delegate.
+
+**Primary metric:** `PaymentDelegate` revocation rate within 7 days of first use.
+**Secondary metric:** Time-from-first-use to revocation (distributions - looking for bimodal: fast-revoke = distrust; late-revoke = normal expiry).
+
+**Rollout:** Closed beta only initially; requires consent from merchant to enable the Customer Portal integration for `PaymentDelegate` visibility. Kill switch: if Customer Portal visibility causes unexpected spike in revocations (signal of confusion about what agent permission means), disable portal section.
+
+---
+
+## 16) Risk register
+
+| Risk | Probability | Impact | Mitigation | Owner |
+|---|---|---|---|---|
+| Card network rules do not accommodate `PaymentDelegate` as a stored credential variant | Medium | High - blocks `PaymentDelegate` from GA | Pre-clearance review with Visa and Mastercard legal liaisons; design within stored credential framework before building; prepare fallback (advisory-only `PaymentDelegate` without Stripe-side enforcement) | Legal / Payments |
+| SCA (PSD2) exemption rate for `AutoTopUp` in Europe lower than expected | Medium | Medium - European `AutoTopUp` success rate drops; merchants see lower refill rates for EU customers | Model as Merchant Initiated Transactions (MIT) after initial SCA-authenticated setup; document SCA setup flow clearly; test auth rates in UK/DE/FR early in closed beta | Payments |
+| `CreditDeduction` latency exceeds 100ms under production load at scale | Low | High - merchants revert to DIY Redis ledger; core SLO breach | Invest in in-memory balance layer before GA; load test to 10,000 concurrent deductions per second; warm standby for balance service | Infra |
+| Merchants misuse `tab` mode and accumulate large negative balances they cannot collect | Medium | Medium - Stripe credit risk exposure if merchant owes large tab and churns | Cap `tab_limit` at a merchant-configurable maximum; require Stripe review for `tab_limit` above a threshold (e.g., $10,000 equivalent); default `tab_limit` to null (block mode) | Risk |
+| `PaymentDelegate` fraud: agent application uses delegate to extract funds beyond user intent | Low | High - regulatory and reputational risk | Scope enforcement at Stripe API layer; real-time Radar signals on delegated transactions; user notification email on each delegated payment; revocation available in <60s | Fraud / Radar |
+| Competitor (Lago v2 or Orb) ships native Stripe integration that removes the two-vendor complexity argument | Medium | Medium - reduces Stripe's native-integration advantage | Ship `CreditBalance` before Lago achieves broad distribution; prioritise GA timeline; monitor Lago/Orb changelogs | Product |
+
+---
+
+## 17) Resolved open question (from v1 Q6)
+
+**Q6: `CreditBalance` vs. enhanced `Meter` object - resolved.**
+
+**Options evaluated:**
+
+| Option | Pros | Cons |
+|---|---|---|
+| Implement `CreditBalance` as specialised `Meter` with deduction semantics | Reuses existing `Meter` infrastructure; smaller API surface; consistent object model | Stretches `Meter` semantics (Meters are accumulate-forward, not deduct-from; inversion is confusing); Meter aggregates asynchronously by design - real-time deduction conflicts with Meter's consistency model |
+| Net-new `CreditBalance` object separate from `Meter` | Clean API semantics; correct data model for decremental balance; allows independent SLOs for deduction latency vs. metering | Wider API surface; separate infra investment; merchants must understand both `Meter` and `CreditBalance` if they use both |
+
+**Decision: Net-new `CreditBalance` object.**
+
+Rationale: The `Meter` object is designed for accumulate-forward usage aggregation with asynchronous batch processing - it is explicitly not suited for synchronous real-time deduction. Forcing `CreditBalance` semantics into `Meter` would require either breaking `Meter`'s existing contract (high risk to existing integrations) or adding conditional behaviour that makes both objects harder to reason about. The API surface increase is acceptable given that `CreditBalance` targets a distinct user need (merchants billing credits) from `Meter` (merchants tracking usage for post-pay invoicing). Both objects can coexist on the same `Customer`; merchants using hybrid billing (subscription + credit overage) will use both.
+
+---
+
+## 18) Open questions (remaining for v3)
 
 1. **Regulatory model for `PaymentDelegate`:** Card networks (Visa, Mastercard) have stored credential frameworks for recurring charges. Does agent-initiated payment fit stored credential rules, or does it require a new network-level primitive? What are the network rules on liability shift for agent-initiated transactions where the cardholder did not initiate the specific purchase?
 
@@ -417,8 +1014,6 @@ Should `CreditBalance` be denominated in currency (cents) or in merchant-defined
 4. **`AutoTopUp` and SCA (PSD2):** Strong Customer Authentication in Europe requires explicit cardholder authentication for most payment initiation. Auto top-up is a merchant-initiated transaction without the cardholder present. Does this require SCA exemption requests (Stripe's Transaction Risk Analysis exemption) or stored credential rules, and what is the expected auth rate vs. a customer-present top-up?
 
 5. **Design partner selection for `PaymentDelegate` closed beta:** Which 10 agentic platforms should be in the first closed beta cohort? Criteria: live agentic product, existing Stripe merchant, clear use case for scoped agent payment, and willingness to provide structured feedback every 2 weeks.
-
-6. **`CreditBalance` vs. enhanced `Meter` object:** Internally, Stripe could implement `CreditBalance` as a specialised `Meter` with deduction semantics, or as a net-new object. The net-new object is cleaner from an API perspective but adds to Stripe's already-wide surface. The extended `Meter` reuses existing infrastructure but stretches the `Meter` object's semantics beyond its current design intent.
 
 ---
 
