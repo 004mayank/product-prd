@@ -68,4 +68,4 @@ More PRDs will be added iteratively as part of ongoing product exploration.
 - Assumptions are called out where data is not available
 - Scope is intentionally constrained to keep execution realistic
 
-Feedback and discussion are always welcome🤟🏻.
+Feedback and discussion are always welcome.
