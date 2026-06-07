@@ -2,8 +2,8 @@
 
 **Product:** Perplexity Answer Engine (Trust Layer)
 **Author:** Mayank Malviya
-**Version:** v2 - Improved PRD
-**Changes from v1:** Added full data models, API contracts, verifier model benchmark with technology decision, detailed acceptance criteria per requirement, competitive experiment framework with power calculations, resolved open questions 1-6, UX copy proposals, dependency map, and expanded event schema with field-level descriptions.
+**Version:** v3 - Final PRD
+**Changes from v2:** Resolved Q7 (proprietary verifier model): build vs. buy analysis with investment thesis, labelling milestone gates, go/no-go criteria, and Phase 3 model promotion checklist. Added phased rollout plan with explicit launch gates, kill-switch trigger conditions, and dependency critical path. Expanded experiment backlog with rollout owners, acceptance criteria, and end-state decisions. Added launch readiness checklist. All seven open questions are now resolved.
 **Source teardown:** https://github.com/004mayank/product-teardowns/blob/main/perplexity-teardown.md
 
 ---
@@ -13,7 +13,8 @@
 | Version | Key additions |
 |---|---|
 | v1 | Problem statement, goals/non-goals, target personas, three solution pillars, core loops, basic requirements, event schemas, success metrics, competitive context, key trade-offs, open questions |
-| v2 | Full data models, API contracts, verifier model benchmark and decision, detailed acceptance criteria, competitive experiment framework with power calculations, resolved open questions 1-6, UX copy proposals, dependency map, expanded instrumentation spec |
+| v2 | Full data models, API contracts, verifier model benchmark and technology decision, detailed acceptance criteria, competitive experiment framework with power calculations, resolved open questions 1-6, UX copy proposals, dependency map, expanded instrumentation spec |
+| v3 | Resolved Q7 (proprietary model build vs. buy analysis with milestone gates), phased rollout plan with launch gates and kill-switch conditions, expanded experiment backlog with rollout owners and end-state decisions, launch readiness checklist |
 
 ---
 
@@ -25,7 +26,7 @@ That contract is broken more often than users know. The teardown identifies "cit
 
 This PRD specifies **Perplexity Verified Answers**: a claim-level citation grounding system that checks the semantic relationship between each LLM-generated claim and its cited source at inference time, before the answer streams to the user. It makes the citation contract enforceable, not just decorative.
 
-v1 established the core thesis, target segments, solution pillars, and measurement framework. v2 adds the full data models, API contracts, verifier model technology decision, detailed acceptance criteria, competitive experiment framework with statistical rigor, and resolves six of seven open questions. v3 will be the production-grade specification with phased rollout plan, launch gates, and fully resolved open questions.
+v1 established the core thesis, target segments, solution pillars, and measurement framework. v2 added the full data models, API contracts, verifier model technology decision, detailed acceptance criteria, competitive experiment framework with statistical rigor, and resolved six of seven open questions. v3 is the production-grade specification: all open questions are resolved, the phased rollout plan includes explicit launch gates and kill-switch conditions, the experiment backlog is fully specified with rollout owners, and the launch readiness checklist provides the ship criteria for each phase.
 
 ---
 
@@ -51,7 +52,7 @@ Three forces converge that make this the right moment to invest:
 
 2. **Enterprise pipeline is blocked by citation accuracy.** The teardown identifies the "enterprise trust wall" as a primary deal-stall pattern: consultant-segment buyers want auditability, not just answers. A citation verification layer with per-answer audit logs transforms the enterprise sales conversation from "can we trust it?" to "here is the verification record."
 
-3. **LLM citation accuracy is technically solvable now.** Embedding-based semantic similarity models (sentence-transformers, cross-encoder rerankers) are fast enough (<200ms P95 on cached source content) and cheap enough (fractions of a cent per answer) to run as a post-generation verification pass without materially impacting answer latency or unit economics. The benchmark data in section 5 below confirms this is deployable at scale in 2025.
+3. **LLM citation accuracy is technically solvable now.** Embedding-based semantic similarity models (sentence-transformers, cross-encoder rerankers) are fast enough (<200ms P95 on cached source content) and cheap enough (fractions of a cent per answer) to run as a post-generation verification pass without materially impacting answer latency or unit economics. The benchmark data in section 5 below confirms this is deployable at scale today.
 
 ---
 
@@ -844,10 +845,11 @@ Clear, consistent copy for confidence signals is as important as the underlying 
 | CRM instrumentation for enterprise deal pipeline | Sales tooling | Sales Ops | P2 | Needed to measure Loop E enterprise conversion metric; not on critical path for product launch |
 | Legal review of `methodology_disclaimer` copy | Legal / trust and safety | Legal | P1 (Phase 2, before enterprise beta) | PDF export with disclaimer requires legal sign-off; budget 3 weeks for review cycle |
 | Privacy review of `CitationAuditRecord` retention policy | Legal / privacy | Privacy / legal | P0 | 5-year retention of query text in audit records; requires privacy review and GDPR/CCPA compliance confirmation before Phase 1 write-path goes live |
+| Labelling infrastructure for `perplexity-claim-verifier-v1` | ML tooling | ML Platform | P1 (Phase 2 start) | 50K labelled examples required; annotation tooling must be ready at Phase 2 kickoff to hit Phase 3 model deadline |
 
 ---
 
-## 17) Open questions - partially resolved (v2)
+## 17) Open questions - all resolved (v3)
 
 **Q1: Verifier model selection - RESOLVED**
 
@@ -885,15 +887,282 @@ Clear, consistent copy for confidence signals is as important as the underlying 
 
 ---
 
-**Q7: Proprietary model investment timeline - remains open for v3**
+**Q7: Proprietary model investment timeline - RESOLVED**
 
-This open question requires a strategic roadmap decision (multi-quarter, multi-million-dollar investment) that should be resolved at the v3 stage with input from engineering leadership and the product roadmap process. v3 will include a build vs. buy analysis for the `perplexity-claim-verifier-v1` fine-tuned model.
+**Decision: Build `perplexity-claim-verifier-v1`**
+
+The decision is to invest in a proprietary fine-tuned verifier model, starting at Phase 2, targeting Phase 3 production deployment. The reasoning follows from three compounding arguments:
+
+**Argument 1 - Quality ceiling of off-the-shelf models**
+
+The `cross-encoder/ms-marco-electra-base` (Phase 2 target) achieves 91.3% accuracy on the generic test set. However, its training distribution (MS MARCO document ranking pairs) does not match Perplexity's specific distribution: short conversational claims extracted from LLM-synthesized prose, checked against heterogeneous web content. A model fine-tuned on 50K Perplexity-specific (claim, source, label) pairs closes this distributional gap, with an estimated accuracy of 93-95% - a 2-4 pp improvement that at scale means millions fewer mislabelled citations per day.
+
+**Argument 2 - Cost economics flip at scale**
+
+| Model | Cost per 1M claims | Claims/day at current Perplexity scale (est. 5B claims/year) | Annual cost |
+|---|---|---|---|
+| `electra-base` (Phase 2) | $0.31 | ~13.7M | ~$1.55M/year |
+| `perplexity-claim-verifier-v1` (Phase 3, self-hosted) | ~$0.08 | ~13.7M | ~$0.40M/year |
+
+At projected growth (10B+ claims/year within 18 months), the annual savings from the proprietary model are approximately $2.3M/year - more than sufficient to justify the $50-75K one-time investment to build and train it.
+
+**Argument 3 - Competitive moat**
+
+The proprietary model is trained on Perplexity's own (query, source, claim, label) corpus. No competitor can access or replicate this data. The model becomes uniquely good at Perplexity's specific citation patterns - academic paper citations, PR newswire formats, LLM synthesis phrasing. Any well-funded competitor can deploy `electra-base`; no competitor can deploy `perplexity-claim-verifier-v1`.
+
+**Investment requirements and timeline:**
+
+| Milestone | Description | Timeline | Cost |
+|---|---|---|---|
+| Annotation tooling setup | Internal labelling interface for (claim, source) pairs; annotator guidelines written and tested | Phase 2 start (week 17) | 2 weeks ML eng |
+| Initial labelling batch | 10,000 labelled examples; inter-annotator agreement check | Weeks 18-22 | ~$5K annotator cost |
+| Agreement gate | Inter-annotator agreement (Cohen's kappa) must be >= 0.82 on 500-example spot check before scaling. If <0.82: revise annotation guidelines before continuing. | Week 23 gate | - |
+| Full labelling batch | 50,000 total labelled examples | Weeks 23-32 | ~$20K annotator cost |
+| Model training | Fine-tune `electra-base` on Perplexity corpus; hyperparameter sweep; 5-fold cross-validation | Weeks 33-36 | ~$15K compute |
+| Model quality gate | Must achieve >93% accuracy and <4% false-positive rate on the held-out Perplexity test set before promotion to staging | Week 37 gate | - |
+| Cost gate | Must run at <$0.12/1M claims at P50 on production-equivalent serving infrastructure | Week 37 gate | - |
+| Phase 3 production deployment | Replace `electra-base` in Web Focus production; `MiniLM` remains as Academic Focus fallback during warm-up | Weeks 38-42 (Phase 3) | Ongoing serving cost ~$0.40M/year |
+
+**Go/No-Go criteria summary:**
+
+- Gate 1 (annotation quality): Cohen's kappa >= 0.82 on 500-example spot check at 10K labelled examples. If breached: halt and revise annotation guidelines.
+- Gate 2 (model accuracy): >93% accuracy AND <4% false-positive rate on held-out Perplexity test set. If breached: run additional training epochs or expand training data; do not promote to production.
+- Gate 3 (serving cost): <$0.12/1M claims at P50 on production infra. If breached: optimize serving (quantization, batch size tuning) before evaluating whether the economics still justify deployment.
+
+**Alternative considered and rejected:** License the same model fine-tuning task to a third party (e.g., Cohere or a model API provider) and use their fine-tuned endpoint. Rejected because: (a) the Perplexity query-claim corpus is proprietary and sending it to a third party creates IP risk; (b) the serving cost structure for a third-party endpoint does not improve over `electra-base`; (c) the competitive moat argument requires Perplexity to own the model weights.
 
 ---
 
-## 18) Key trade-offs
+## 18) Phased rollout plan (v3 addition)
 
-| Trade-off | Current bias (v2) | Cost | Alternative considered |
+### Phase 0 - Baseline measurement (Weeks 1-4)
+
+**Goal:** Establish a statistically reliable baseline of current citation accuracy before any engineering investment. No user-visible changes.
+
+**Scope:**
+- Sample 10,000 answers per day across all Focus modes.
+- For each sampled answer, run a post-hoc semantic matching job: for each cited claim, does the cited source document contain text semantically supporting the claim?
+- Segment by Focus mode (Academic, Web, Social), query category (medical, financial, current events, technical, general), and synthesis model (`synthesis_model` field).
+- Define and instrument the `citation_accuracy_score` metric in the analytics pipeline before Phase 1 launch.
+
+**Launch gate:**
+- Statistically reliable baseline `citation_accuracy_score` per Focus mode established within 28 days (confidence interval width <3 pp at 95% level).
+- Worst-performing segment (likely: Web + current-events + thin-content sources) and best-performing segment (likely: Academic + scholarly sources) identified.
+- Privacy review for `CitationAuditRecord` retention policy completed and signed off.
+
+**Kill switch:** Not applicable - this phase makes no production changes.
+
+**Owner:** ML Platform (sampling job) + Analytics (pipeline) + Privacy/Legal (retention review).
+
+---
+
+### Phase 1 - Academic Focus verification, signals hidden (Weeks 5-16)
+
+**Goal:** Ship claim-level verification as a guardrail layer on Academic Focus mode. Run A/B test: verification on but confidence signals visible to 50% of treatment group, hidden from 50% (control arm). Signals-visible treatment is the full UX; control arm confirms the model's accuracy improvement independently of the UI signals.
+
+**Scope:**
+- Post-generation verification pass live on 100% of Academic Focus answers.
+- `CitationAuditRecord` written to database for all Academic Focus answers (all plans).
+- Confidence signals (`verified`, `low_confidence`) rendered to the 50% treatment group.
+- A/B test instrumentation: `citation_clicked_with_signal`, `upgrade_initiated`, D7 retention, Pro churn guardrail - all measured as described in section 9.
+- Source panel passage highlight (Req 2.3) shipped for the treatment group.
+- Audit panel and API not yet live (Phase 2 deliverable).
+
+**Launch gate (all criteria must pass before Phase 1 goes live):**
+
+| Gate criterion | Threshold | Evidence source |
+|---|---|---|
+| Verifier model false-positive rate | <8% on 500-example labelled test set | ML release evaluation |
+| Verification pass latency P95 (Academic Focus) | <400ms on synthetic load test at 200 concurrent QPS | Load test result |
+| Degraded-mode chaos test passed | Answers stream without error when verifier service is at 100% failure rate | Staging chaos test result |
+| `CitationAuditRecord` write path load tested | Can handle 30M writes/day without write latency regression | Storage load test |
+| Privacy review complete | `CitationAuditRecord` retention policy approved by Privacy/Legal | Signed review document |
+| Exact-match override unit tests passing | Zero false positives on 100-example date/proper-noun test set | Automated test suite |
+
+**Kill-switch trigger conditions:**
+
+| Condition | Action |
+|---|---|
+| Academic Focus answer latency P95 >3.5s for any 7-day rolling window | Pause rollout; optimize verifier batch parallelism before resuming |
+| Pro churn rate for treatment cohort exceeds control by >0.5 pp at day 14 | Pause signals-visible arm; investigate whether `low_confidence` labels are causing trust damage; do not pause signals-hidden arm |
+| Verifier service error rate >1% of queries for any 1-hour window | Activate degraded mode (no signals shown); page on-call ML Platform engineer |
+| `citation_accuracy_score` improvement vs. Phase 0 baseline is <3 pp at day 42 | Evaluate verifier model retraining before expanding to Web Focus; do not proceed to Phase 2 until improvement is >5 pp |
+
+**Owner:** ML Platform (model serving), Core Experience (UI badges + passage highlight), Backend Platform (audit record storage), Analytics (A/B instrumentation).
+
+---
+
+### Phase 2 - Web Focus Pro rollout + enterprise audit trail (Weeks 17-28)
+
+**Goal:** Extend verification and confidence signals to Web Focus Pro users. Ship the enterprise audit panel in Spaces and the audit API. Migrate the verifier model from `MiniLM` to `electra-base` for Web Focus (higher recall on thin content). Begin the labelling project for `perplexity-claim-verifier-v1`.
+
+**Scope:**
+- Verification live on Web Focus answers for Pro users only (50% A/B split; control = Pro users with verification running but signals hidden; treatment = Pro users with full confidence signals).
+- `cross-encoder/ms-marco-electra-base` deployed for Web Focus; `MiniLM` remains for Academic Focus (faster, sufficient accuracy).
+- Platt scaling recalibrated on a Web Focus-specific calibration set of 2,000 labelled (claim, web-source) pairs.
+- `citation_audit_panel_opened` and audit export (JSON + PDF) live for Teams and Enterprise accounts in Spaces.
+- Audit API (`GET /v1/audit/threads/{thread_id}`) live for Teams and Enterprise API keys.
+- Labelling project kickoff: annotation tooling live; first batch of 10,000 (claim, source, label) examples from Perplexity's live query corpus.
+
+**Launch gate (all criteria must pass):**
+
+| Gate criterion | Threshold | Evidence source |
+|---|---|---|
+| Phase 1 A/B test result: Academic Focus citation click rate | >+3 pp vs. control at 95% significance | Analytics A/B report |
+| Phase 1 A/B test result: Pro churn guardrail | Treatment churn not >0.5 pp above control | Analytics cohort report |
+| `electra-base` false-positive rate on Web Focus test set | <6% on 200-example Web Focus labelled test set | ML release evaluation |
+| Web Focus verification latency P95 | <600ms on synthetic load test at 400 concurrent QPS | Load test result |
+| Audit panel legal review | `methodology_disclaimer` copy approved by Legal | Signed legal review |
+| Audit export PDF generation latency | <60s for sessions up to 100 answers in staging | Staging performance test |
+| Inter-annotator agreement gate (annotation tooling) | Cohen's kappa >= 0.82 on 500-example spot check | Annotation quality report |
+
+**Kill-switch trigger conditions:**
+
+| Condition | Action |
+|---|---|
+| Web Focus answer latency P95 >4s for any 7-day window | Pause Web Focus signals; investigate electra-base serving overhead; MiniLM fallback available |
+| Pro churn rate in treatment cohort exceeds control by >0.5 pp at day 14 (Web Focus) | Pause Web Focus signals-visible arm; full root cause analysis before resuming |
+| Audit export triggers any privacy incident (unauthorized data access, export scope exceeding authorized threads) | Disable audit export endpoint; incident response runbook activation |
+| Web Focus `citation_accuracy_score` improvement <4 pp at day 42 | Evaluate electra-base model recalibration; do not proceed to Phase 3 without >4 pp improvement |
+
+**Owner:** ML Platform (electra-base deployment + Platt recalibration + labelling infrastructure), Core Experience (Web Focus UI), Backend Platform (audit API + Spaces panel), Spaces team (audit panel UI), Legal (disclaimer review), Analytics (Web Focus A/B).
+
+---
+
+### Phase 3 - Full rollout + proprietary model + enterprise GA (Weeks 29-42)
+
+**Goal:** Roll verification and confidence signals to all Web Focus users (free tier included). Replace `electra-base` with `perplexity-claim-verifier-v1` if model quality and serving cost gates are passed. Enterprise audit trail goes to GA (out of beta). Publish the competitive accuracy benchmark as a public research post.
+
+**Scope:**
+- Web Focus verification and confidence signals rolled to 100% of free-tier users.
+- `perplexity-claim-verifier-v1` promoted to Web Focus production if all three model gates (accuracy, false-positive, cost) are passed. `electra-base` remains available as a hot fallback.
+- Enterprise audit panel and API promoted from beta to GA; enterprise sales enablement materials updated with verified citation accuracy metrics.
+- Competitive benchmark published as a Perplexity research blog post (500-query methodology; human-labelled results vs. Google AI Overviews and ChatGPT Search).
+- `Pro churn` and `D30 retention` analysis published internally as a 90-day rollout postmortem; findings fed into Q1 roadmap prioritisation.
+
+**Launch gate (all criteria must pass):**
+
+| Gate criterion | Threshold | Evidence source |
+|---|---|---|
+| `perplexity-claim-verifier-v1` model quality gate | >93% accuracy AND <4% false-positive rate on held-out Perplexity test set | ML release evaluation |
+| `perplexity-claim-verifier-v1` serving cost gate | <$0.12/1M claims at P50 on production-equivalent infra | Infrastructure cost measurement |
+| Phase 2 Web Focus Pro A/B result: citation click rate | >+3 pp vs. control at 95% significance | Analytics A/B report |
+| Free-tier false-positive rate projection | Projected `low_confidence` rate for free-tier query mix <18% per answer | ML Platform projection using Phase 2 data |
+| Enterprise GA readiness: audit panel QA | Zero critical bugs in audit panel and export across test accounts in 5 enterprise customer profiles | Enterprise QA sign-off |
+| Competitive benchmark publication | Methodology cleared by Legal and Trust/Safety for external publication | Legal sign-off document |
+
+**Kill-switch trigger conditions:**
+
+| Condition | Action |
+|---|---|
+| Free-tier `low_confidence` signal rate >25% per answer in first 7 days post-rollout | Raise `low_confidence` threshold from 0.65 to 0.70 for free tier (reduces signal rate without removing the feature); monitor for 7 days |
+| `perplexity-claim-verifier-v1` accuracy degrades >2 pp vs. Phase 3 launch baseline at any monthly evaluation | Revert to `electra-base`; open incident for model drift investigation |
+| Competitive benchmark generates a negative PR event (e.g., a query in the benchmark produces a citation laundering example in Perplexity's own output) | Pause benchmark publication; run full audit of the 500-query set before re-publishing |
+
+**Owner:** ML Platform (proprietary model promotion + free-tier rollout), Core Experience (free-tier UI), Enterprise team (GA launch), Marketing/Research (benchmark publication), Analytics (rollout postmortem).
+
+---
+
+## 19) Experiment backlog (v3: expanded with rollout owners and end-state decisions)
+
+| Experiment | Hypothesis | Primary metric | Acceptance criteria | Guardrail | Kill-switch | Rollout phase | Owner | End-state decision |
+|---|---|---|---|---|---|---|---|---|
+| Verified badge on Academic Focus citation click rate | Green `verified` badge increases citation click rate by making verification feel rewarding rather than anxiety-driven | `citation_clicked_with_signal` rate for `signal_type: verified` | >+4 pp at 95% significance; n=1,800 sessions per variant | Source panel click rate for `single_source` must not drop >1 pp | If `single_source` click rate drops >2 pp: hide badge for `single_source`, keep for `verified` only | Phase 1 | Core Experience + Analytics | If criteria met: ship to 100% Academic Focus; if not met: A/B copy variants ("Supported" vs. "Verified") |
+| Pro conversion lift from verified badge (Academic Focus) | Free-tier Academic Focus users exposed to `verified` signals upgrade to Pro at higher rate than control | `upgrade_initiated` within 30 days | >+1.5 pp at 90% significance (looser threshold; longer conversion window) | D7 retention must not decline in treatment group | If D7 retention declines >1 pp: investigate whether badge creates over-reliance; remove badge from free tier if retention harm confirmed | Phase 1 (measure for 30 days post-exposure) | Growth + Analytics | If criteria met: include `verified` badge as a visible upgrade driver in Pro upgrade copy |
+| `low_confidence` label copy (icon-only vs. "Limited sources") | "Limited sources" copy produces higher `citation_clicked_with_signal` rate than icon-only because it names the problem explicitly | `citation_clicked_with_signal` for `signal_type: low_confidence` | Copy variant achieves >+5 pp click rate vs. icon-only at 90% significance | Pro churn guardrail: churn must not rise by >0.5 pp in treatment group at day 14 | If Pro churn rises >0.5 pp in either variant: default to icon-only (less alarming) | Phase 1 (embedded within Test 1 allocation) | Core Experience + Copy | If criteria met: ship "Limited sources" copy globally; if not: ship icon-only |
+| Passage highlight in source panel | Highlighting the specific `source_passage_used` increases citation click rate and reduces trust-anxiety (users know exactly what to look for when they open the source) | `citation_clicked_with_signal` rate; time-to-close-source-panel (proxy for user found what they were looking for) | Click rate +3 pp; time-to-close <5s for verified citations (vs. >10s current estimate) | Source panel load time must not increase >100ms | If source panel load time increases >200ms due to passage highlight fetch: lazy-load the highlight after the panel opens | Phase 1 (treatment arm only) | Core Experience + Retrieval | If criteria met: ship globally; integrate passage highlight into the `low_confidence` arm as well |
+| Web Focus `electra-base` false-positive reduction (PR domain override) | Applying format-specific threshold adjustment for PR distribution domains reduces false-positive rate from ~7% to <5% on press release citations | False-positive rate on 200-example PR citation test set | False-positive rate <5% with override applied vs. 7.2% without | No regression on non-PR source false-positive rate | If non-PR false-positive rate increases by >1 pp: roll back domain-specific override | Phase 2 (model version gate) | ML Platform | If criteria met: include override in `electra-base` production deployment; extend domain list quarterly |
+| Enterprise audit panel activation (Teams beta) | Teams trial accounts that see the citation audit panel during trial are more likely to convert to paid and invite IT stakeholders | `citation_audit_panel_opened` rate; `space_member_invited` with `it_reviewer` role | >60% of active Teams trial accounts open audit panel within 14 days; >30% of audit panel openers invite IT/legal stakeholder | Teams trial-to-paid conversion must not decline during beta (audit panel must not create "too complicated" friction for non-research teams) | If Teams trial-to-paid conversion declines >2 pp: simplify the audit panel entry point in the Spaces UI | Phase 2 (Teams beta) | Enterprise team + Spaces team | If criteria met: ship to Teams GA; include audit panel demo in enterprise sales kit |
+| Competitive benchmark onboarding modal | Showing new users "Perplexity cites [X]% more accurately than Google AI Overviews" in post-first-query onboarding increases Academic Focus adoption and D14 retention | Academic Focus adoption rate in first 7 sessions; D14 session return rate | Academic Focus adoption +3 pp; D14 return rate not declining vs. control | D7 return rate must not decline in treatment group | If D7 return rate declines >1 pp: pause the modal; investigate whether competitive framing feels aggressive or off-brand | Phase 3 (after competitive benchmark published) | Growth + Marketing | If criteria met: integrate into standard new-user onboarding flow with updated accuracy stat each quarter |
+| `perplexity-claim-verifier-v1` vs. `electra-base` head-to-head (shadow mode) | Proprietary model achieves >93% accuracy and <4% false-positive rate on Perplexity-specific query distribution, confirming Phase 3 model promotion criteria | Accuracy on held-out Perplexity test set; false-positive rate; serving cost per 1M claims | >93% accuracy; <4% false-positive; <$0.12/1M claims | `electra-base` must remain hot as fallback throughout shadow evaluation | If proprietary model shows accuracy regression vs. `electra-base` on any Focus mode subcategory: do not promote; retrain with additional data from that subcategory | Phase 3 (model evaluation gate) | ML Platform | If criteria met: promote to production; if not: continue `electra-base` and extend Phase 3 timeline by 8 weeks |
+
+---
+
+## 20) Launch readiness checklist (v3 addition)
+
+### Phase 1 - Academic Focus launch
+
+**Engineering:**
+- [ ] Verifier service deployed to production with batch inference support (up to 8 pairs per call)
+- [ ] Platt scaling calibration set (2,000 examples) validated; ECE <0.05 confirmed
+- [ ] Degraded-mode failover tested in staging (100% service failure -> answers stream without error)
+- [ ] `CitationAuditRecord` write path load tested at 30M writes/day
+- [ ] Exact-match override unit tests passing (100 date/proper-noun examples, zero false positives)
+- [ ] `citation_verification_completed`, `citation_signal_rendered`, `citation_clicked_with_signal` events instrumented and validated in staging
+
+**Product:**
+- [ ] `verified` and `low_confidence` badges WCAG 2.1 AA accessibility audit passed
+- [ ] Tooltip copy reviewed and approved by Trust and Safety
+- [ ] Source panel passage highlight tested across 20 representative source types
+- [ ] A/B split instrumentation (treatment/control assignment by user hash) confirmed correct
+- [ ] False-positive rate <8% confirmed on 500-example labelled test set
+
+**Legal/Privacy:**
+- [ ] `CitationAuditRecord` retention policy reviewed and approved by Privacy/Legal
+- [ ] Free-tier `claim_text` hashing behaviour confirmed in audit records
+- [ ] GDPR/CCPA compliance for `claim_text` 90-day retention confirmed
+
+**Monitoring:**
+- [ ] P95 latency alert configured: page if Academic Focus verification P95 >3.5s for any 1-hour window
+- [ ] Verifier service error rate alert configured: page if error rate >1% for any 1-hour window
+- [ ] `CitationAuditRecord` reconciliation job scheduled (daily; alerts on missing records)
+- [ ] Pro churn weekly monitoring dashboard live for Phase 1 cohort
+
+---
+
+### Phase 2 - Web Focus Pro + enterprise beta launch
+
+**Engineering:**
+- [ ] `electra-base` deployed; Platt scaling recalibrated on Web Focus-specific 2,000-example calibration set
+- [ ] Web Focus false-positive rate <6% on 200-example Web Focus labelled test set
+- [ ] Audit API (`GET /v1/audit/threads/{thread_id}`) load tested; rate limiting (100 req/min/account) enforced
+- [ ] Audit export JSON schema validation passing; PDF export generation <60s for 100-answer sessions
+- [ ] Audit panel UI in Spaces load tested across Teams and Enterprise test accounts
+- [ ] Annotation tooling live; 10,000-example labelling batch initiated
+
+**Product:**
+- [ ] Web Focus verification and confidence signals QA across all supported browsers and mobile apps
+- [ ] Audit panel onboarding copy ("run your first search to generate an audit record") live for new Teams/Enterprise Spaces
+- [ ] PDF export `methodology_disclaimer` copy approved by Legal
+- [ ] Competitive benchmark 500-query set prepared; dual annotation initiated
+
+**Legal/Privacy:**
+- [ ] `methodology_disclaimer` copy signed off by Legal
+- [ ] Audit export data scope confirmed (only threads belonging to the requesting account/Space)
+- [ ] Enterprise beta DPA template reviewed and available for pilot customers
+
+**Monitoring:**
+- [ ] Web Focus P95 latency alert configured: page if >4s for any 1-hour window
+- [ ] Audit export error rate alert: page if PDF generation failures >5% for any 1-hour window
+- [ ] Labelling batch inter-annotator agreement checkpointed at 1,000, 5,000, and 10,000 examples
+
+---
+
+### Phase 3 - Full rollout + proprietary model GA
+
+**Engineering:**
+- [ ] `perplexity-claim-verifier-v1` model quality gates passed (>93% accuracy, <4% false-positive on Perplexity test set)
+- [ ] Serving cost gate passed (<$0.12/1M claims at P50 on production infra)
+- [ ] `electra-base` hot fallback confirmed deployable within 5 minutes of a rollback decision
+- [ ] Free-tier rollout: `low_confidence` rate <18% per answer for representative free-tier query mix (validated in canary deployment)
+- [ ] Enterprise GA: audit panel QA across 5 enterprise customer profiles; zero critical bugs
+
+**Product:**
+- [ ] Competitive benchmark publication cleared by Legal and Trust/Safety
+- [ ] Pro upgrade copy updated to include "citation accuracy verified by AI" as a feature callout
+- [ ] Enterprise sales enablement materials updated: "Perplexity Verified Answers achieves >90% citation accuracy on Academic Focus"
+- [ ] 90-day rollout postmortem completed and findings distributed to product and ML teams
+
+**Monitoring:**
+- [ ] Free-tier `low_confidence` rate spike alert: page if >25% per answer in any 1-hour window within first 14 days
+- [ ] `perplexity-claim-verifier-v1` monthly accuracy evaluation job scheduled
+- [ ] Competitive benchmark accuracy stats refreshed and published quarterly
+
+---
+
+## 21) Key trade-offs
+
+| Trade-off | Current bias (v3) | Cost | Alternative considered |
 |---|---|---|---|
 | Verification latency vs. answer quality | Accept up to 600ms added latency for Web Focus | Some users may perceive a slower answer; competitive disadvantage if Google closes the speed gap | Run verification asynchronously after streaming starts; show confidence signals as they complete rather than gating the stream. Risk: answer arrives before signals; late signal appearance feels like a glitch |
 | Confidence signal granularity vs. user trust in the signal | Three-level signal (`verified`, `single_source`, `low_confidence`) | More levels = more cognitive load; risk of "confidence signal fatigue" | Binary signal (verified / not verified). Rejected: too blunt; `single_source` citations should not be penalised with a "not verified" label |
@@ -901,6 +1170,7 @@ This open question requires a strategic roadmap decision (multi-quarter, multi-m
 | Audit record as Pro feature vs. all users | Teams/Enterprise only for audit record; confidence signals for free tier | Free users get better citation confidence UX but no auditability | Audit records for all users. Rejected: storage cost and privacy surface area; enterprise auditability is a specific value prop for Teams/Enterprise, not a mass-market feature |
 | Automatic source replacement for `low_confidence` vs. user notification | Attempt replacement first; fall back to `low_confidence` signal | Replacement may substitute a marginally better source but miss the user's preferred original source | Only notify; never replace. Rejected: if a better source exists in the retrieved pool, replacing silently improves accuracy with no UX cost |
 | Privacy: store `claim_text` for all users vs. only Teams/Enterprise | Hashed for free; plain-text for Pro+; full retention for Teams/Enterprise | Reduces forensic value of free-tier audit records; some asymmetry in data handling | Full retention for all plans. Rejected: GDPR/CCPA compliance complexity and user trust risk of storing all query text indefinitely for non-paying users |
+| Build vs. buy the proprietary verifier model | Build `perplexity-claim-verifier-v1` (Phase 3) | $50-75K upfront investment; 6-month timeline; ML engineering resource commitment | License a fine-tuned model from a third-party provider. Rejected: IP risk of sharing proprietary query corpus; no serving cost improvement; no competitive moat |
 
 ---
 
